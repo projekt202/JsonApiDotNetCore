@@ -229,7 +229,7 @@ namespace JsonApiDotNetCore.Services
 
             bool hasImplicitChanges = _resourceChangeTracker.HasImplicitChanges();
 
-            if (!hasImplicitChanges)
+            if (!_options.AlwaysReturnResourceOnCreateUpdate && !hasImplicitChanges)
             {
                 return null;
             }
@@ -383,7 +383,7 @@ namespace JsonApiDotNetCore.Services
 
             bool hasImplicitChanges = _resourceChangeTracker.HasImplicitChanges();
 
-            if (!hasImplicitChanges)
+            if (!_options.AlwaysReturnResourceOnCreateUpdate && !hasImplicitChanges)
             {
                 return null;
             }
