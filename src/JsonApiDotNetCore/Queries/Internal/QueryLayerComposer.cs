@@ -443,7 +443,7 @@ namespace JsonApiDotNetCore.Queries.Internal
 
             sort = _resourceDefinitionAccessor.OnApplySort(resourceContext.ResourceType, sort);
 
-            if (sort == null)
+            if (sort == null && _options.EnableDefaultSortById)
             {
                 AttrAttribute idAttribute = GetIdAttribute(resourceContext);
                 sort = new SortExpression(new SortElementExpression(new ResourceFieldChainExpression(idAttribute), true).AsArray());

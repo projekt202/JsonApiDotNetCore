@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
+using JsonApiDotNetCore.Controllers;
 using JsonApiDotNetCore.Resources.Annotations;
 using JsonApiDotNetCore.Serialization;
 using JsonApiDotNetCore.Serialization.Objects;
@@ -61,7 +62,7 @@ namespace JsonApiDotNetCore.Middleware
 
                 httpContext.RegisterJsonApiRequest();
             }
-            else if (IsOperationsRequest(routeValues))
+            else if (IsOperationsRequest(httpContext))
             {
                 if (!await ValidateContentTypeHeaderAsync(HeaderConstants.AtomicOperationsMediaType, httpContext, options.SerializerSettings) ||
                     !await ValidateAcceptHeaderAsync(AtomicOperationsMediaType, httpContext, options.SerializerSettings))
@@ -283,11 +284,16 @@ namespace JsonApiDotNetCore.Middleware
             return actionName.EndsWith("Relationship", StringComparison.Ordinal);
         }
 
-        private static bool IsOperationsRequest(RouteValueDictionary routeValues)
-        {
-            string actionName = (string)routeValues["action"];
-            return actionName == "PostOperations";
-        }
+        private static bool IsOperationsRequest(HttpContext httpContext)
+        {           
+            Endpoint endpoint = httpContext.GetEndpoint();
+            var controllerActionDescriptor = endpoint?.Metadata.GetMetadata<ControllerActionDescriptor>();
+
+            if (controllerActionDescriptor == null)
+                return false;            
+            
+            return controllerActionDescriptor.ControllerTypeInfo.IsSubclassOf(typeof(BaseJsonApiOperationsController));            
+        }       
 
         private static void SetupOperationsRequest(JsonApiRequest request, IJsonApiOptions options, HttpRequest httpRequest)
         {
