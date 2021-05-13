@@ -1,0 +1,27 @@
+name: .NET
+
+on:
+  push:
+    branches: [ master ]
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 3.1.0
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+    - name: Notify slack
+      uses: baijunyao/action-slack-notify@v3.0.1
+      if: always()
+      with:
+        slack_channel_id: testing-slack-app
+        slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+        github_context: ${{ toJson(github) }}
