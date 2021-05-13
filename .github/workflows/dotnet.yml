@@ -18,10 +18,4 @@ jobs:
       run: dotnet restore
     - name: Build
       run: dotnet build --configuration Release --no-restore
-    - name: Notify slack
-      uses: baijunyao/action-slack-notify@v3.0.1
-      if: always()
-      with:
-        slack_channel_id: testing-slack-app
-        slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
-        github_context: ${{ toJson(github) }}
+    
