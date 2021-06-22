@@ -18,8 +18,10 @@ Modified by Projekt202</Description>
     <DebugType>embedded</DebugType>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <AssemblyName>Projekt202.JsonApiDotNetCore</AssemblyName>
-    <Version>4.1.2</Version>
+    <Version>4.1.2.1</Version>
     <RepositoryUrl>https://github.com/projekt202/JsonApiDotNetCore</RepositoryUrl>
+    <AssemblyVersion>4.1.2.1</AssemblyVersion>
+    <FileVersion>4.1.2.1</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
