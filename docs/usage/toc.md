@@ -1,7 +1,6 @@
 # [Resources](resources/index.md)
 ## [Attributes](resources/attributes.md)
 ## [Relationships](resources/relationships.md)
-## [Resource Definitions](resources/resource-definitions.md)
 
 # Reading data
 ## [Filtering](reading/filtering.md)
@@ -21,11 +20,13 @@
 # [Routing](routing.md)
 # [Errors](errors.md)
 # [Metadata](meta.md)
+# [Caching](caching.md)
 
 # Extensibility
 ## [Layer Overview](extensibility/layer-overview.md)
+## [Resource Definitions](extensibility/resource-definitions.md)
 ## [Controllers](extensibility/controllers.md)
 ## [Resource Services](extensibility/services.md)
 ## [Resource Repositories](extensibility/repositories.md)
 ## [Middleware](extensibility/middleware.md)
-## [Custom Query Formats](extensibility/custom-query-formats.md)
+## [Query Strings](extensibility/query-strings.md)

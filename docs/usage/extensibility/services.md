@@ -102,14 +102,20 @@ IResourceService
     +-- ICreateService
     |   POST /
     |
-    +-- IDeleteService
-    |   DELETE /{id}
-    |
     +-- IUpdateService
     |   PATCH /{id}
     |
-    +-- IUpdateRelationshipService
-        PATCH /{id}/relationships/{relationship}
+    +-- IDeleteService
+    |   DELETE /{id}
+    |
+    +-- IAddToRelationshipService
+    |   POST /{id}/relationships/{relationship}
+    |
+    +-- ISetRelationshipService
+    |   PATCH /{id}/relationships/{relationship}
+    |
+    +-- IRemoveFromRelationshipService
+        DELETE /{id}/relationships/{relationship}
 ```
 
 In order to take advantage of these interfaces you first need to register the service for each implemented interface.
@@ -131,9 +137,9 @@ public class Startup
 ```
 
 In v3.0 we introduced an extension method that you can use to register a resource service on all of its JsonApiDotNetCore interfaces.
-This is helpful when you implement a subset of the resource interfaces and want to register them all in one go.
+This is helpful when you implement (a subset of) the resource interfaces and want to register them all in one go.
 
-Note: If you're using service discovery, this happens automatically.
+**Note:** If you're using [auto-discovery](~/usage/resource-graph.md#auto-discovery), this happens automatically.
 
 ```c#
 public class Startup

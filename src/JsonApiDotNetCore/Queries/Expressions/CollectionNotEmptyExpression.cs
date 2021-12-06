@@ -12,7 +12,6 @@ namespace JsonApiDotNetCore.Queries.Expressions
     public class CollectionNotEmptyExpression : FilterExpression
     {
         public ResourceFieldChainExpression TargetCollection { get; }
-
         public FilterExpression Filter { get; }
 
         public CollectionNotEmptyExpression(ResourceFieldChainExpression targetCollection, FilterExpression filter)

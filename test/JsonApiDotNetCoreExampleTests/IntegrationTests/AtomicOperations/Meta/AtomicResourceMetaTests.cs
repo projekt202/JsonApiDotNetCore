@@ -1,10 +1,9 @@
-using System;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using FluentAssertions;
 using FluentAssertions.Extensions;
-using JsonApiDotNetCore.Resources;
+using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Serialization.Objects;
 using JsonApiDotNetCoreExample.Controllers;
 using JsonApiDotNetCoreExampleTests.Startups;
@@ -27,15 +26,22 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.AtomicOperations.Meta
 
             testContext.ConfigureServicesAfterStartup(services =>
             {
-                services.AddScoped<IResourceDefinition<MusicTrack, Guid>, MusicTrackMetaDefinition>();
-                services.AddScoped<IResourceDefinition<TextLanguage, Guid>, TextLanguageMetaDefinition>();
+                services.AddResourceDefinition<MusicTrackMetaDefinition>();
+                services.AddResourceDefinition<TextLanguageMetaDefinition>();
+
+                services.AddSingleton<ResourceDefinitionHitCounter>();
             });
+
+            var hitCounter = _testContext.Factory.Services.GetRequiredService<ResourceDefinitionHitCounter>();
+            hitCounter.Reset();
         }
 
         [Fact]
         public async Task Returns_resource_meta_in_create_resource_with_side_effects()
         {
             // Arrange
+            var hitCounter = _testContext.Factory.Services.GetRequiredService<ResourceDefinitionHitCounter>();
+
             string newTitle1 = _fakers.MusicTrack.Generate().Title;
             string newTitle2 = _fakers.MusicTrack.Generate().Title;
 
@@ -88,12 +94,20 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.AtomicOperations.Meta
 
             responseDocument.Results[1].SingleData.Meta.Should().HaveCount(1);
             responseDocument.Results[1].SingleData.Meta["Copyright"].Should().Be("(C) 1994. All rights reserved.");
+
+            hitCounter.HitExtensibilityPoints.Should().BeEquivalentTo(new[]
+            {
+                (typeof(MusicTrack), ResourceDefinitionHitCounter.ExtensibilityPoint.GetMeta),
+                (typeof(MusicTrack), ResourceDefinitionHitCounter.ExtensibilityPoint.GetMeta)
+            }, options => options.WithStrictOrdering());
         }
 
         [Fact]
         public async Task Returns_resource_meta_in_update_resource_with_side_effects()
         {
             // Arrange
+            var hitCounter = _testContext.Factory.Services.GetRequiredService<ResourceDefinitionHitCounter>();
+
             TextLanguage existingLanguage = _fakers.TextLanguage.Generate();
 
             await _testContext.RunOnDatabaseAsync(async dbContext =>
@@ -133,6 +147,11 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.AtomicOperations.Meta
             responseDocument.Results.Should().HaveCount(1);
             responseDocument.Results[0].SingleData.Meta.Should().HaveCount(1);
             responseDocument.Results[0].SingleData.Meta["Notice"].Should().Be(TextLanguageMetaDefinition.NoticeText);
+
+            hitCounter.HitExtensibilityPoints.Should().BeEquivalentTo(new[]
+            {
+                (typeof(TextLanguage), ResourceDefinitionHitCounter.ExtensibilityPoint.GetMeta)
+            }, options => options.WithStrictOrdering());
         }
     }
 }
