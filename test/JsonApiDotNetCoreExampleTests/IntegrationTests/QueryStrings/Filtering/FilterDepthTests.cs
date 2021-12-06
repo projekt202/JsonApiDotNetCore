@@ -149,7 +149,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
         public async Task Can_filter_on_HasOne_relationship()
         {
             // Arrange
-            List<BlogPost> posts = _fakers.BlogPost.Generate(2);
+            List<BlogPost> posts = _fakers.BlogPost.Generate(3);
             posts[0].Author = _fakers.WebAccount.Generate();
             posts[0].Author.UserName = "Conner";
             posts[1].Author = _fakers.WebAccount.Generate();
@@ -162,7 +162,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
                 await dbContext.SaveChangesAsync();
             });
 
-            const string route = "/blogPosts?include=author&filter=equals(author.userName,'Smith')";
+            const string route = "/blogPosts?include=author&filter=or(equals(author.userName,'Smith'),equals(author,null))";
 
             // Act
             (HttpResponseMessage httpResponse, Document responseDocument) = await _testContext.ExecuteGetAsync<Document>(route);
@@ -170,9 +170,11 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
             // Assert
             httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
 
-            responseDocument.ManyData.Should().HaveCount(1);
-            responseDocument.Included.Should().HaveCount(1);
+            responseDocument.ManyData.Should().HaveCount(2);
+            responseDocument.ManyData.Should().ContainSingle(post => post.Id == posts[1].StringId);
+            responseDocument.ManyData.Should().ContainSingle(post => post.Id == posts[2].StringId);
 
+            responseDocument.Included.Should().HaveCount(1);
             responseDocument.Included[0].Id.Should().Be(posts[1].Author.StringId);
         }
 
@@ -191,6 +193,35 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
             });
 
             const string route = "/blogs?filter=greaterThan(count(posts),'0')";
+
+            // Act
+            (HttpResponseMessage httpResponse, Document responseDocument) = await _testContext.ExecuteGetAsync<Document>(route);
+
+            // Assert
+            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+
+            responseDocument.ManyData.Should().HaveCount(1);
+            responseDocument.ManyData[0].Id.Should().Be(blogs[1].StringId);
+        }
+
+        [Fact]
+        public async Task Can_filter_on_HasMany_relationship_with_nested_condition()
+        {
+            // Arrange
+            List<Blog> blogs = _fakers.Blog.Generate(2);
+            blogs[0].Posts = _fakers.BlogPost.Generate(1);
+            blogs[1].Posts = _fakers.BlogPost.Generate(1);
+            blogs[1].Posts[0].Comments = _fakers.Comment.Generate(1).ToHashSet();
+            blogs[1].Posts[0].Comments.ElementAt(0).Text = "ABC";
+
+            await _testContext.RunOnDatabaseAsync(async dbContext =>
+            {
+                await dbContext.ClearTableAsync<Blog>();
+                dbContext.Blogs.AddRange(blogs);
+                await dbContext.SaveChangesAsync();
+            });
+
+            const string route = "/blogs?filter=has(posts,has(comments,startsWith(text,'A')))";
 
             // Act
             (HttpResponseMessage httpResponse, Document responseDocument) = await _testContext.ExecuteGetAsync<Document>(route);
@@ -236,6 +267,44 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
         }
 
         [Fact]
+        public async Task Can_filter_on_HasManyThrough_relationship_with_nested_condition()
+        {
+            // Arrange
+            List<Blog> blogs = _fakers.Blog.Generate(2);
+            blogs[0].Posts = _fakers.BlogPost.Generate(1);
+            blogs[1].Posts = _fakers.BlogPost.Generate(1);
+
+            blogs[1].Posts[0].BlogPostLabels = new HashSet<BlogPostLabel>
+            {
+                new BlogPostLabel
+                {
+                    Label = new Label
+                    {
+                        Color = LabelColor.Green
+                    }
+                }
+            };
+
+            await _testContext.RunOnDatabaseAsync(async dbContext =>
+            {
+                await dbContext.ClearTableAsync<Blog>();
+                dbContext.Blogs.AddRange(blogs);
+                await dbContext.SaveChangesAsync();
+            });
+
+            const string route = "/blogs?filter=has(posts,has(labels,equals(color,'Green')))";
+
+            // Act
+            (HttpResponseMessage httpResponse, Document responseDocument) = await _testContext.ExecuteGetAsync<Document>(route);
+
+            // Assert
+            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+
+            responseDocument.ManyData.Should().HaveCount(1);
+            responseDocument.ManyData[0].Id.Should().Be(blogs[1].StringId);
+        }
+
+        [Fact]
         public async Task Can_filter_in_scope_of_HasMany_relationship()
         {
             // Arrange
@@ -260,8 +329,8 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
             httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
 
             responseDocument.ManyData.Should().HaveCount(1);
-            responseDocument.Included.Should().HaveCount(1);
 
+            responseDocument.Included.Should().HaveCount(1);
             responseDocument.Included[0].Id.Should().Be(blog.Posts[1].StringId);
         }
 
@@ -290,8 +359,8 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
             httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
 
             responseDocument.SingleData.Should().NotBeNull();
-            responseDocument.Included.Should().HaveCount(1);
 
+            responseDocument.Included.Should().HaveCount(1);
             responseDocument.Included[0].Id.Should().Be(blog.Owner.Posts[1].StringId);
         }
 
@@ -341,8 +410,8 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
             httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
 
             responseDocument.ManyData.Should().HaveCount(2);
-            responseDocument.Included.Should().HaveCount(1);
 
+            responseDocument.Included.Should().HaveCount(1);
             responseDocument.Included[0].Id.Should().Be(posts[1].BlogPostLabels.First().Label.StringId);
         }
 
@@ -372,8 +441,8 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.QueryStrings.Filtering
             httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
 
             responseDocument.ManyData.Should().HaveCount(1);
-            responseDocument.Included.Should().HaveCount(2);
 
+            responseDocument.Included.Should().HaveCount(2);
             responseDocument.Included[0].Id.Should().Be(blog.Owner.StringId);
             responseDocument.Included[1].Id.Should().Be(blog.Owner.Posts[1].StringId);
         }

@@ -446,12 +446,12 @@ namespace JsonApiDotNetCore.Hooks.Internal
             }
 
             Dictionary<RelationshipAttribute, IEnumerable> inverse = new Dictionary<RelationshipAttribute, IEnumerable>();
-            foreach(KeyValuePair<RelationshipAttribute, IEnumerable> pair in implicitAffected)
+            foreach (KeyValuePair<RelationshipAttribute, IEnumerable> pair in implicitAffected)
             {
                 var inverseRelationship = _resourceGraph.GetInverseRelationship(pair.Key);
                 if (inverseRelationship != null)
                     inverse.Add(inverseRelationship, pair.Value);
-            }            
+            }
 
             IRelationshipsDictionary resourcesByRelationship = CreateRelationshipHelper(resourceTypeToInclude, inverse);
             CallHook(container, ResourceHook.BeforeImplicitUpdateRelationship, ArrayFactory.Create<object>(resourcesByRelationship, pipeline));
