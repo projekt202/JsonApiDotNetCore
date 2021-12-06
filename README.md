@@ -135,3 +135,61 @@ Alternatively, to build and validate the code, run all tests, generate code cove
 ```bash
 Build.ps1
 ```
+## Referencing the Framework
+
+A nuget package for this framework is automatically built upon compilation, which can then be used in other dependent applications. However,
+it is NOT available on public http://nuget.org. There are several options available in referencing the framework.
+
+
+#### Application-Level NuGet Package Hosting
+
+To use the NuGet package without a remote host, you can add it to your dependent application solution. 
+
+- Create 'Dependencies' file system folder in your dependent application and copy the NuGet package to it.
+- Create a 'Dependencies' Solution folder in your dependent application solution and then add the NuGet package to it.
+- Create a *nuget.config* file in the root of your dependent application with a package source that points to your 'Dependencies' folder.
+
+Visual Studio will add the new package source location so you can then add a reference to the JADNC nuget package.
+
+
+#### Host in Private Azure DevOps Artifact Feed
+
+* Ensure Nuget.exe is installed locally
+* Ensure a package location is added to *nuget.config* file **in your dependent application**:
+ 
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="Your-Feed-Name" value="https://pkgs.dev.azure.com/Your-Path-To-Azure-DevOps/_packaging/Your-Feed-Name/nuget/v3/index.json" />
+  </packageSources>
+</configuration>
+
+
+* From the Powershell command-line and the **JsonApiDotNetCore** project directory, issue the following:
+
+ ```bash
+ nuget.exe restore
+
+ nuget.exe push -Source "Your-Feed-Name" -ApiKey az .\bin\{build-config}\Projekt202.JsonApiDotNetCore.{current version}.nupkg  -configfile {PATH TO DEPENDENT APP}\nuget.config
+ ```
+See https://docs.microsoft.com/en-us/azure/devops/artifacts/get-started-nuget?view=azure-devops for more details.
+
+#### Host on Other Private Nuget Feed Platform
+
+- [Artifactory](https://www.jfrog.com/artifactory/) from JFrog.
+- [BaGet](https://github.com/loic-sharma/BaGet), an open-source implementation of NuGet V3 server built on ASP.NET Core
+- [Cloudsmith](https://cloudsmith.io/l/nuget-feed/), a fully managed package management SaaS
+- [GitHub package registry](https://help.github.com/articles/configuring-nuget-for-use-with-github-package-registry)
+- [LiGet](https://github.com/ai-traders/liget), an open-source implementation of NuGet V2 server that runs on kestrel in docker
+- [MyGet](https://myget.org/)
+- [Nexus Repository OSS](https://www.sonatype.com/nexus-repository-oss) from Sonatype.
+- [NuGet Server (Open Source)](https://github.com/svenkle/nuget-server), an open-source implementation similar to Inedo's NuGet Server
+- [NuGet Server](http://nugetserver.net/), a community project from Inedo
+- [ProGet](https://inedo.com/proget) from Inedo
+- [Sleet](https://github.com/emgarten/sleet), an open-source NuGet V3 static feed generator
+- [TeamCity](https://www.jetbrains.com/teamcity/) from JetBrains.
+
+
+#### Include DLL Directly in Dependent App
+
+Include the compiled DLL in your solution and reference it directly using a relative path.
