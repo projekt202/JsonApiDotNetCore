@@ -1,5 +1,11 @@
 # Routing
 
+An endpoint URL provides access to a resource or a relationship. Resource endpoints are divided into:
+- Primary endpoints, for example: "/articles" and "/articles/1".
+- Secondary endpoints, for example: "/articles/1/author" and "/articles/1/comments".
+
+In the relationship endpoint "/articles/1/relationships/comments", "articles" is the left side of the relationship and "comments" the right side.
+
 ## Namespacing and Versioning URLs
 You can add a namespace to all URLs by specifying it in ConfigureServices.
 
@@ -56,7 +62,7 @@ GET /orderLines HTTP/1.1
 It is possible to bypass the default routing convention for a controller.
 
 ```c#
-[Route("v1/custom/route/orderLines"), DisableRoutingConvention]
+[Route("v1/custom/route/lines-in-order"), DisableRoutingConvention]
 public class OrderLineController : JsonApiController<OrderLine>
 {
     public OrderLineController(IJsonApiOptions options, ILoggerFactory loggerFactory,
@@ -66,8 +72,6 @@ public class OrderLineController : JsonApiController<OrderLine>
     }
 }
 ```
-
-It is required to match your custom url with the exposed name of the associated resource.
 
 ## Advanced Usage: Custom Routing Convention
 

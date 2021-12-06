@@ -10,10 +10,9 @@ using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Resources;
 using JsonApiDotNetCore.Serialization.Client.Internal;
 using JsonApiDotNetCore.Serialization.Objects;
-using JsonApiDotNetCoreExample.Controllers;
-using JsonApiDotNetCoreExample.Data;
-using JsonApiDotNetCoreExample.Definitions;
-using JsonApiDotNetCoreExample.Models;
+using JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks.Controllers;
+using JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks.Definitions;
+using JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using TestBuildingBlocks;
@@ -21,12 +20,12 @@ using Xunit;
 
 namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
 {
-    public sealed class ResourceHookTests : IClassFixture<ExampleIntegrationTestContext<ResourceHooksStartup<AppDbContext>, AppDbContext>>
+    public sealed class ResourceHookTests : IClassFixture<ExampleIntegrationTestContext<ResourceHooksStartup<HooksDbContext>, HooksDbContext>>
     {
-        private readonly ExampleIntegrationTestContext<ResourceHooksStartup<AppDbContext>, AppDbContext> _testContext;
-        private readonly ExampleFakers _fakers = new ExampleFakers();
+        private readonly ExampleIntegrationTestContext<ResourceHooksStartup<HooksDbContext>, HooksDbContext> _testContext;
+        private readonly HooksFakers _fakers = new HooksFakers();
 
-        public ResourceHookTests(ExampleIntegrationTestContext<ResourceHooksStartup<AppDbContext>, AppDbContext> testContext)
+        public ResourceHookTests(ExampleIntegrationTestContext<ResourceHooksStartup<HooksDbContext>, HooksDbContext> testContext)
         {
             _testContext = testContext;
 
@@ -78,7 +77,8 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
             User responseUser = GetResponseDeserializer().DeserializeSingle<User>(responseDocument).Data;
             var document = JsonConvert.DeserializeObject<Document>(responseDocument);
 
-            document.SingleData.Attributes.Should().NotContainKey("password");
+            document.Should().NotBeNull();
+            document!.SingleData.Attributes.Should().NotContainKey("password");
             document.SingleData.Attributes["userName"].Should().Be(newUser.UserName);
 
             await _testContext.RunOnDatabaseAsync(async dbContext =>
@@ -543,7 +543,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
             List<Person> persons = _fakers.Person.Generate(2);
             TodoItem lockedTodo = _fakers.TodoItem.Generate();
             lockedTodo.IsLocked = true;
-            lockedTodo.StakeHolders = persons.ToHashSet();
+            lockedTodo.Stakeholders = persons.ToHashSet();
 
             await _testContext.RunOnDatabaseAsync(async dbContext =>
             {
@@ -558,7 +558,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
                     type = "todoItems",
                     relationships = new
                     {
-                        stakeHolders = new
+                        stakeholders = new
                         {
                             data = new[]
                             {
@@ -602,7 +602,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
 
             TodoItem lockedTodo = _fakers.TodoItem.Generate();
             lockedTodo.IsLocked = true;
-            lockedTodo.StakeHolders = persons.ToHashSet();
+            lockedTodo.Stakeholders = persons.ToHashSet();
 
             TodoItem unlockedTodo = _fakers.TodoItem.Generate();
 
@@ -620,7 +620,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
                     id = unlockedTodo.Id,
                     relationships = new
                     {
-                        stakeHolders = new
+                        stakeholders = new
                         {
                             data = new[]
                             {
@@ -663,7 +663,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.ResourceHooks
             List<Person> persons = _fakers.Person.Generate(2);
             TodoItem lockedTodo = _fakers.TodoItem.Generate();
             lockedTodo.IsLocked = true;
-            lockedTodo.StakeHolders = persons.ToHashSet();
+            lockedTodo.Stakeholders = persons.ToHashSet();
 
             await _testContext.RunOnDatabaseAsync(async dbContext =>
             {

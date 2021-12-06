@@ -92,6 +92,7 @@ namespace JsonApiDotNetCore.Queries.Expressions
                 if (Visit(expression.TargetCollection, argument) is ResourceFieldChainExpression newTargetCollection)
                 {
                     FilterExpression newFilter = expression.Filter != null ? Visit(expression.Filter, argument) as FilterExpression : null;
+
                     var newExpression = new CollectionNotEmptyExpression(newTargetCollection, newFilter);
                     return newExpression.Equals(expression) ? expression : newExpression;
                 }

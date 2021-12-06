@@ -100,7 +100,7 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.CompositeKeys
         }
 
         private FilterExpression CreateEqualityComparisonOnCompositeKey(ResourceFieldChainExpression existingCarIdChain, long regionIdValue,
-          string licensePlateValue)
+            string licensePlateValue)
         {
             ResourceFieldChainExpression regionIdChain = ReplaceLastAttributeInChain(existingCarIdChain, _regionIdAttribute);
 

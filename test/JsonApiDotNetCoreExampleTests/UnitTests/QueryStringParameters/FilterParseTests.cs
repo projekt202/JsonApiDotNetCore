@@ -136,8 +136,6 @@ namespace JsonApiDotNetCoreExampleTests.UnitTests.QueryStringParameters
             "and(contains(title,'sales'),contains(title,'marketing'),contains(title,'advertising'))")]
         [InlineData("filter[posts]", "or(and(not(equals(author.userName,null)),not(equals(author.displayName,null))),not(has(comments,startsWith(text,'A'))))",
             "posts", "or(and(not(equals(author.userName,null)),not(equals(author.displayName,null))),not(has(comments,startsWith(text,'A'))))")]
-        [InlineData("filter[posts]", "or(and(not(equals(author.userName,null)),not(equals(author.displayName,null))),not(has(comments)))", "posts",
-            "or(and(not(equals(author.userName,null)),not(equals(author.displayName,null))),not(has(comments)))")]
         public void Reader_Read_Succeeds(string parameterName, string parameterValue, string scopeExpected, string valueExpected)
         {
             // Act

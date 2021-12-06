@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
@@ -14,9 +13,11 @@ using JsonApiDotNetCore.Resources.Annotations;
 using JsonApiDotNetCore.Serialization;
 using JsonApiDotNetCore.Serialization.Objects;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Net.Http.Headers;
 using Newtonsoft.Json;
 
 namespace JsonApiDotNetCore.Middleware
@@ -46,8 +47,12 @@ namespace JsonApiDotNetCore.Middleware
             ArgumentGuard.NotNull(request, nameof(request));
             ArgumentGuard.NotNull(resourceContextProvider, nameof(resourceContextProvider));
 
-            RouteValueDictionary routeValues = httpContext.GetRouteData().Values;
+            if (!await ValidateIfMatchHeaderAsync(httpContext, options.SerializerSettings))
+            {
+                return;
+            }
 
+            RouteValueDictionary routeValues = httpContext.GetRouteData().Values;
             ResourceContext primaryResourceContext = CreatePrimaryResourceContext(httpContext, controllerResourceMapping, resourceContextProvider);
 
             if (primaryResourceContext != null)
@@ -75,7 +80,25 @@ namespace JsonApiDotNetCore.Middleware
                 httpContext.RegisterJsonApiRequest();
             }
 
+            // Workaround for bug https://github.com/dotnet/aspnetcore/issues/33394
+            httpContext.Features.Set<IQueryFeature>(new FixedQueryFeature(httpContext.Features));
+
             await _next(httpContext);
+        }
+
+        private async Task<bool> ValidateIfMatchHeaderAsync(HttpContext httpContext, JsonSerializerSettings serializerSettings)
+        {
+            if (httpContext.Request.Headers.ContainsKey(HeaderNames.IfMatch))
+            {
+                await FlushResponseAsync(httpContext.Response, serializerSettings, new Error(HttpStatusCode.PreconditionFailed)
+                {
+                    Title = "Detection of mid-air edit collisions using ETags is not supported."
+                });
+
+                return false;
+            }
+
+            return true;
         }
 
         private static ResourceContext CreatePrimaryResourceContext(HttpContext httpContext, IControllerResourceMapping controllerResourceMapping,
@@ -131,7 +154,7 @@ namespace JsonApiDotNetCore.Middleware
 
             foreach (string acceptHeader in acceptHeaders)
             {
-                if (MediaTypeWithQualityHeaderValue.TryParse(acceptHeader, out MediaTypeWithQualityHeaderValue headerValue))
+                if (MediaTypeHeaderValue.TryParse(acceptHeader, out MediaTypeHeaderValue headerValue))
                 {
                     headerValue.Quality = null;
 
@@ -190,7 +213,7 @@ namespace JsonApiDotNetCore.Middleware
         private static void SetupResourceRequest(JsonApiRequest request, ResourceContext primaryResourceContext, RouteValueDictionary routeValues,
             IJsonApiOptions options, IResourceContextProvider resourceContextProvider, HttpRequest httpRequest)
         {
-            request.IsReadOnly = httpRequest.Method == HttpMethod.Get.Method;
+            request.IsReadOnly = httpRequest.Method == HttpMethod.Get.Method || httpRequest.Method == HttpMethod.Head.Method;
             request.Kind = EndpointKind.Primary;
             request.PrimaryResource = primaryResourceContext;
             request.PrimaryId = GetPrimaryRequestId(routeValues);
@@ -285,15 +308,15 @@ namespace JsonApiDotNetCore.Middleware
         }
 
         private static bool IsOperationsRequest(HttpContext httpContext)
-        {           
+        {
             Endpoint endpoint = httpContext.GetEndpoint();
             var controllerActionDescriptor = endpoint?.Metadata.GetMetadata<ControllerActionDescriptor>();
 
             if (controllerActionDescriptor == null)
-                return false;            
-            
-            return controllerActionDescriptor.ControllerTypeInfo.IsSubclassOf(typeof(BaseJsonApiOperationsController));            
-        }       
+                return false;
+
+            return controllerActionDescriptor.ControllerTypeInfo.IsSubclassOf(typeof(BaseJsonApiOperationsController));
+        }
 
         private static void SetupOperationsRequest(JsonApiRequest request, IJsonApiOptions options, HttpRequest httpRequest)
         {

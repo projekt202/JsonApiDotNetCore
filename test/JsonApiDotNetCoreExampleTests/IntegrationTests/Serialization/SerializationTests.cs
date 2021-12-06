@@ -37,6 +37,45 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.Serialization
             var options = (JsonApiOptions)testContext.Factory.Services.GetRequiredService<IJsonApiOptions>();
             options.IncludeExceptionStackTraceInErrors = false;
             options.AllowClientGeneratedIds = true;
+            options.IncludeJsonApiVersion = false;
+        }
+
+        [Fact]
+        public async Task Returns_no_body_for_successful_HEAD_request()
+        {
+            // Arrange
+            Meeting meeting = _fakers.Meeting.Generate();
+
+            await _testContext.RunOnDatabaseAsync(async dbContext =>
+            {
+                dbContext.Meetings.Add(meeting);
+                await dbContext.SaveChangesAsync();
+            });
+
+            string route = "/meetings/" + meeting.StringId;
+
+            // Act
+            (HttpResponseMessage httpResponse, string responseDocument) = await _testContext.ExecuteHeadAsync<string>(route);
+
+            // Assert
+            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+
+            responseDocument.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task Returns_no_body_for_failed_HEAD_request()
+        {
+            // Arrange
+            const string route = "/meetings/99999999";
+
+            // Act
+            (HttpResponseMessage httpResponse, string responseDocument) = await _testContext.ExecuteHeadAsync<string>(route);
+
+            // Assert
+            httpResponse.Should().HaveStatusCode(HttpStatusCode.NotFound);
+
+            responseDocument.Should().BeEmpty();
         }
 
         [Fact]
@@ -122,6 +161,63 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.Serialization
         }
 
         [Fact]
+        public async Task Can_get_primary_resources_with_empty_include()
+        {
+            // Arrange
+            List<Meeting> meetings = _fakers.Meeting.Generate(1);
+
+            await _testContext.RunOnDatabaseAsync(async dbContext =>
+            {
+                await dbContext.ClearTableAsync<Meeting>();
+                dbContext.Meetings.AddRange(meetings);
+                await dbContext.SaveChangesAsync();
+            });
+
+            const string route = "/meetings/?include=attendees";
+
+            // Act
+            (HttpResponseMessage httpResponse, string responseDocument) = await _testContext.ExecuteGetAsync<string>(route);
+
+            // Assert
+            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+
+            responseDocument.Should().BeJson(@"{
+  ""links"": {
+    ""self"": ""http://localhost/meetings/?include=attendees"",
+    ""first"": ""http://localhost/meetings/?include=attendees""
+  },
+  ""data"": [
+    {
+      ""type"": ""meetings"",
+      ""id"": """ + meetings[0].StringId + @""",
+      ""attributes"": {
+        ""title"": """ + meetings[0].Title + @""",
+        ""startTime"": """ + meetings[0].StartTime.ToString("O") + @""",
+        ""duration"": """ + meetings[0].Duration + @""",
+        ""location"": {
+          ""lat"": " + meetings[0].Location.Latitude.ToString(CultureInfo.InvariantCulture) + @",
+          ""lng"": " + meetings[0].Location.Longitude.ToString(CultureInfo.InvariantCulture) + @"
+        }
+      },
+      ""relationships"": {
+        ""attendees"": {
+          ""links"": {
+            ""self"": ""http://localhost/meetings/" + meetings[0].StringId + @"/relationships/attendees"",
+            ""related"": ""http://localhost/meetings/" + meetings[0].StringId + @"/attendees""
+          },
+          ""data"": []
+        }
+      },
+      ""links"": {
+        ""self"": ""http://localhost/meetings/" + meetings[0].StringId + @"""
+      }
+    }
+  ],
+  ""included"": []
+}");
+        }
+
+        [Fact]
         public async Task Can_get_primary_resource_by_ID()
         {
             // Arrange
@@ -187,7 +283,9 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.Serialization
             httpResponse.Should().HaveStatusCode(HttpStatusCode.NotFound);
 
             var jObject = JsonConvert.DeserializeObject<JObject>(responseDocument);
-            string errorId = jObject["errors"].Should().NotBeNull().And.Subject.Select(element => (string)element["id"]).Single();
+            jObject.Should().NotBeNull();
+
+            string errorId = jObject!["errors"].Should().NotBeNull().And.Subject.Select(element => (string)element["id"]).Single();
 
             responseDocument.Should().BeJson(@"{
   ""errors"": [
@@ -555,6 +653,40 @@ namespace JsonApiDotNetCoreExampleTests.IntegrationTests.Serialization
       ""self"": ""http://localhost/meetingAttendees/" + existingAttendee.StringId + @"""
     }
   }
+}");
+        }
+
+        [Fact]
+        public async Task Includes_version_on_resource_endpoint()
+        {
+            // Arrange
+            var options = (JsonApiOptions)_testContext.Factory.Services.GetRequiredService<IJsonApiOptions>();
+            options.IncludeJsonApiVersion = true;
+
+            MeetingAttendee attendee = _fakers.MeetingAttendee.Generate();
+
+            await _testContext.RunOnDatabaseAsync(async dbContext =>
+            {
+                dbContext.Attendees.Add(attendee);
+                await dbContext.SaveChangesAsync();
+            });
+
+            string route = $"/meetingAttendees/{attendee.StringId}/meeting";
+
+            // Act
+            (HttpResponseMessage httpResponse, string responseDocument) = await _testContext.ExecuteGetAsync<string>(route);
+
+            // Assert
+            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+
+            responseDocument.Should().BeJson(@"{
+  ""jsonapi"": {
+    ""version"": ""1.1""
+  },
+  ""links"": {
+    ""self"": ""http://localhost/meetingAttendees/" + attendee.StringId + @"/meeting""
+  },
+  ""data"": null
 }");
         }
     }

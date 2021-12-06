@@ -4,13 +4,13 @@
     <AspNetCoreVersion>3.1.*</AspNetCoreVersion>
     <EFCoreVersion>3.1.*</EFCoreVersion>
     <NpgsqlPostgreSQLVersion>3.1.*</NpgsqlPostgreSQLVersion>
-    <CodeAnalysisRuleSet>$(SolutionDir)CodingGuidelines.ruleset</CodeAnalysisRuleSet>
+    <CodeAnalysisRuleSet>$(MSBuildThisFileDirectory)CodingGuidelines.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="JetBrains.Annotations" Version="2020.3.0" PrivateAssets="All" />
+    <PackageReference Include="JetBrains.Annotations" Version="2021.1.0" PrivateAssets="All" />
     <PackageReference Include="CSharpGuidelinesAnalyzer" Version="3.6.0" PrivateAssets="All" />
-    <AdditionalFiles Include="$(SolutionDir)CSharpGuidelinesAnalyzer.config" Visible="False" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)CSharpGuidelinesAnalyzer.config" Visible="False" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
@@ -25,6 +25,7 @@
     <CoverletVersion>3.0.3</CoverletVersion>
     <FluentAssertionsVersion>5.10.3</FluentAssertionsVersion>
     <MoqVersion>4.16.1</MoqVersion>
-    <XUnitVersion>2.4.1</XUnitVersion>
+    <XUnitVersion>2.4.*</XUnitVersion>
+    <TestSdkVersion>16.10.0</TestSdkVersion>
   </PropertyGroup>
 </Project>

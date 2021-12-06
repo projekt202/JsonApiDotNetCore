@@ -93,11 +93,6 @@ namespace JsonApiDotNetCore.Queries.Internal.QueryableBuilding
             return Expression.Call(typeof(Enumerable), "Any", elementType.AsArray(), source);
         }
 
-        private static MethodCallExpression AnyExtensionMethodCall(Type elementType, Expression source)
-        {
-            return Expression.Call(typeof(Enumerable), "Any", elementType.AsArray(), source);
-        }
-
         public override Expression VisitMatchText(MatchTextExpression expression, Type argument)
         {
             Expression property = Visit(expression.TargetAttribute, argument);
@@ -305,7 +300,7 @@ namespace JsonApiDotNetCore.Queries.Internal.QueryableBuilding
         }
 
         private static string GetPropertyName(ResourceFieldAttribute field)
-        {            
+        {
             return field is HasManyThroughAttribute hasManyThrough ? hasManyThrough.ThroughProperty.Name : field.Property.Name;
         }
     }
