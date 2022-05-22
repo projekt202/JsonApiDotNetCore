@@ -1,74 +1,73 @@
-using System;
-using System.Collections.Generic;
+using System.Collections.Immutable;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Resources.Annotations;
 
-namespace JsonApiDotNetCore.Queries.Internal.Parsing
+namespace JsonApiDotNetCore.Queries.Internal.Parsing;
+
+[PublicAPI]
+public class SparseFieldTypeParser : QueryExpressionParser
 {
-    [PublicAPI]
-    public class SparseFieldTypeParser : QueryExpressionParser
+    private readonly IResourceGraph _resourceGraph;
+
+    public SparseFieldTypeParser(IResourceGraph resourceGraph)
     {
-        private readonly IResourceContextProvider _resourceContextProvider;
+        ArgumentGuard.NotNull(resourceGraph, nameof(resourceGraph));
 
-        public SparseFieldTypeParser(IResourceContextProvider resourceContextProvider)
-            : base(resourceContextProvider)
+        _resourceGraph = resourceGraph;
+    }
+
+    public ResourceType Parse(string source)
+    {
+        Tokenize(source);
+
+        ResourceType resourceType = ParseSparseFieldTarget();
+
+        AssertTokenStackIsEmpty();
+
+        return resourceType;
+    }
+
+    private ResourceType ParseSparseFieldTarget()
+    {
+        if (!TokenStack.TryPop(out Token? token) || token.Kind != TokenKind.Text)
         {
-            _resourceContextProvider = resourceContextProvider;
+            throw new QueryParseException("Parameter name expected.");
         }
 
-        public ResourceContext Parse(string source)
+        EatSingleCharacterToken(TokenKind.OpenBracket);
+
+        ResourceType resourceType = ParseResourceType();
+
+        EatSingleCharacterToken(TokenKind.CloseBracket);
+
+        return resourceType;
+    }
+
+    private ResourceType ParseResourceType()
+    {
+        if (TokenStack.TryPop(out Token? token) && token.Kind == TokenKind.Text)
         {
-            Tokenize(source);
-
-            ResourceContext resourceContext = ParseSparseFieldTarget();
-
-            AssertTokenStackIsEmpty();
-
-            return resourceContext;
+            return GetResourceType(token.Value!);
         }
 
-        private ResourceContext ParseSparseFieldTarget()
+        throw new QueryParseException("Resource type expected.");
+    }
+
+    private ResourceType GetResourceType(string publicName)
+    {
+        ResourceType? resourceType = _resourceGraph.FindResourceType(publicName);
+
+        if (resourceType == null)
         {
-            if (!TokenStack.TryPop(out Token token) || token.Kind != TokenKind.Text)
-            {
-                throw new QueryParseException("Parameter name expected.");
-            }
-
-            EatSingleCharacterToken(TokenKind.OpenBracket);
-
-            ResourceContext resourceContext = ParseResourceName();
-
-            EatSingleCharacterToken(TokenKind.CloseBracket);
-
-            return resourceContext;
+            throw new QueryParseException($"Resource type '{publicName}' does not exist.");
         }
 
-        private ResourceContext ParseResourceName()
-        {
-            if (TokenStack.TryPop(out Token token) && token.Kind == TokenKind.Text)
-            {
-                return GetResourceContext(token.Value);
-            }
+        return resourceType;
+    }
 
-            throw new QueryParseException("Resource type expected.");
-        }
-
-        private ResourceContext GetResourceContext(string resourceName)
-        {
-            ResourceContext resourceContext = _resourceContextProvider.GetResourceContext(resourceName);
-
-            if (resourceContext == null)
-            {
-                throw new QueryParseException($"Resource type '{resourceName}' does not exist.");
-            }
-
-            return resourceContext;
-        }
-
-        protected override IReadOnlyCollection<ResourceFieldAttribute> OnResolveFieldChain(string path, FieldChainRequirements chainRequirements)
-        {
-            throw new NotSupportedException();
-        }
+    protected override IImmutableList<ResourceFieldAttribute> OnResolveFieldChain(string path, FieldChainRequirements chainRequirements)
+    {
+        throw new NotSupportedException();
     }
 }

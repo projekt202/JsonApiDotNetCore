@@ -1,5 +1,5 @@
 <p align="center">
-<img src ="https://raw.githubusercontent.com/json-api-dotnet/JsonApiDotnetCore/master/logo.png" />
+<img src ="https://raw.githubusercontent.com/json-api-dotnet/JsonApiDotNetCore/master/logo.png" />
 </p>
 
 # JsonApiDotNetCore
@@ -17,12 +17,17 @@ The ultimate goal of this library is to eliminate as much boilerplate as possibl
 
 These are some steps you can take to help you understand what this project is and how you can use it:
 
-- [What is JSON:API and why should I use it?](https://nordicapis.com/the-benefits-of-using-json-api/)
-- [The JSON:API specification](http://jsonapi.org/format/)
-- Demo [Video](https://youtu.be/KAMuo6K7VcE), [Blog](https://dev.to/wunki/getting-started-5dkl)
-- [Our documentation](https://www.jsonapi.net/)
-- [Check out the example projects](https://github.com/json-api-dotnet/JsonApiDotNetCore/tree/master/src/Examples)
-- [Embercasts: Full Stack Ember with ASP.NET Core](https://www.embercasts.com/course/full-stack-ember-with-dotnet/watch/whats-in-this-course-cs)
+### About
+- [What is JSON:API and why should I use it?](https://nordicapis.com/the-benefits-of-using-json-api/) (blog, 2017)
+- [Pragmatic JSON:API Design](https://www.youtube.com/watch?v=3jBJOga4e2Y) (video, 2017)
+- [JSON:API and JsonApiDotNetCore](https://www.youtube.com/watch?v=79Oq0HOxyeI) (video, 2021)
+- [JsonApiDotNetCore Release 4.0](https://dev.to/wunki/getting-started-5dkl) (blog, 2020)
+- [JSON:API, .Net Core, EmberJS](https://youtu.be/KAMuo6K7VcE) (video, 2017)
+- [Embercasts: Full Stack Ember with ASP.NET Core](https://www.embercasts.com/course/full-stack-ember-with-dotnet/watch/whats-in-this-course-cs) (paid course, 2017)
+
+### Official documentation
+- [The JSON:API specification](https://jsonapi.org/format/1.1/)
+- [JsonApiDotNetCore website](https://www.jsonapi.net/)
 - [Roadmap](ROADMAP.md)
 
 ## Related Projects
@@ -43,56 +48,43 @@ See [our documentation](https://www.jsonapi.net/) for detailed usage.
 ### Models
 
 ```c#
-public class Article : Identifiable
+#nullable enable
+
+[Resource]
+public class Article : Identifiable<int>
 {
     [Attr]
-    public string Name { get; set; }
-}
-```
-
-### Controllers
-
-```c#
-public class ArticlesController : JsonApiController<Article>
-{
-    public ArticlesController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IResourceService<Article> resourceService,)
-        : base(options, loggerFactory, resourceService)
-    {
-    }
+    public string Name { get; set; } = null!;
 }
 ```
 
 ### Middleware
 
 ```c#
-public class Startup
-{
-    public IServiceProvider ConfigureServices(IServiceCollection services)
-    {
-        services.AddJsonApi<AppDbContext>();
-    }
+// Program.cs
 
-    public void Configure(IApplicationBuilder app)
-    {
-        app.UseRouting();
-        app.UseJsonApi();
-        app.UseEndpoints(endpoints => endpoints.MapControllers());
-    }
-}
+builder.Services.AddJsonApi<AppDbContext>();
+
+// ...
+
+app.UseRouting();
+app.UseJsonApi();
+app.MapControllers();
 ```
 
 ## Compatibility
 
-A lot of changes were introduced in v4. The following chart should help you pick the best version, based on your environment.
+The following chart should help you pick the best version, based on your environment.
 See also our [versioning policy](./VERSIONING_POLICY.md).
 
-| .NET Version      | EF Core Version | JsonApiDotNetCore Version |
-| ----------------- | --------------- | ------------------------- |
-| .NET Core 2.x     | 2.x             | v3.x                      |
-| .NET Core 3.1     | 3.1, 5          | v4                        |
-| .NET 5            | 5               | v4                        |
-
+| JsonApiDotNetCore | Status      | .NET     | Entity Framework Core |
+| ----------------- | ----------- | -------- | --------------------- |
+| 3.x               | Stable      | Core 2.x | 2.x                   |
+| 4.x               | Stable      | Core 3.1 | 3.1                   |
+|                   |             | Core 3.1 | 5                     |
+|                   |             | 5        | 5                     |
+|                   |             | 6        | 5                     |
+| v5.x              | Stable      | 6        | 6                     |
 
 ## Contributing
 
@@ -121,7 +113,7 @@ dotnet build
 Running tests locally requires access to a PostgreSQL database. If you have docker installed, this can be propped up via:
 
 ```bash
-run-docker-postgres.ps1
+pwsh run-docker-postgres.ps1
 ```
 
 And then to run the tests:
@@ -133,7 +125,7 @@ dotnet test
 Alternatively, to build and validate the code, run all tests, generate code coverage and produce the NuGet package:
 
 ```bash
-Build.ps1
+pwsh Build.ps1
 ```
 ## Referencing the Framework
 

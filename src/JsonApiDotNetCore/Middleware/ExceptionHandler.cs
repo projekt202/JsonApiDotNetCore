@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using JetBrains.Annotations;
@@ -8,94 +6,100 @@ using JsonApiDotNetCore.Errors;
 using JsonApiDotNetCore.Serialization.Objects;
 using Microsoft.Extensions.Logging;
 
-namespace JsonApiDotNetCore.Middleware
+namespace JsonApiDotNetCore.Middleware;
+
+/// <inheritdoc />
+[PublicAPI]
+public class ExceptionHandler : IExceptionHandler
 {
-    /// <inheritdoc />
-    [PublicAPI]
-    public class ExceptionHandler : IExceptionHandler
+    private readonly IJsonApiOptions _options;
+    private readonly ILogger _logger;
+
+    public ExceptionHandler(ILoggerFactory loggerFactory, IJsonApiOptions options)
     {
-        private readonly IJsonApiOptions _options;
-        private readonly ILogger _logger;
+        ArgumentGuard.NotNull(loggerFactory, nameof(loggerFactory));
+        ArgumentGuard.NotNull(options, nameof(options));
 
-        public ExceptionHandler(ILoggerFactory loggerFactory, IJsonApiOptions options)
+        _options = options;
+        _logger = loggerFactory.CreateLogger<ExceptionHandler>();
+    }
+
+    public IReadOnlyList<ErrorObject> HandleException(Exception exception)
+    {
+        ArgumentGuard.NotNull(exception, nameof(exception));
+
+        Exception demystified = exception.Demystify();
+
+        LogException(demystified);
+
+        return CreateErrorResponse(demystified);
+    }
+
+    private void LogException(Exception exception)
+    {
+        LogLevel level = GetLogLevel(exception);
+        string message = GetLogMessage(exception);
+
+        _logger.Log(level, exception, message);
+    }
+
+    protected virtual LogLevel GetLogLevel(Exception exception)
+    {
+        ArgumentGuard.NotNull(exception, nameof(exception));
+
+        if (exception is OperationCanceledException)
         {
-            ArgumentGuard.NotNull(loggerFactory, nameof(loggerFactory));
-            ArgumentGuard.NotNull(options, nameof(options));
-
-            _options = options;
-            _logger = loggerFactory.CreateLogger<ExceptionHandler>();
+            return LogLevel.None;
         }
 
-        public ErrorDocument HandleException(Exception exception)
+        if (exception is JsonApiException and not FailedOperationException)
         {
-            ArgumentGuard.NotNull(exception, nameof(exception));
-
-            Exception demystified = exception.Demystify();
-
-            LogException(demystified);
-
-            return CreateErrorDocument(demystified);
+            return LogLevel.Information;
         }
 
-        private void LogException(Exception exception)
-        {
-            LogLevel level = GetLogLevel(exception);
-            string message = GetLogMessage(exception);
+        return LogLevel.Error;
+    }
 
-            _logger.Log(level, exception, message);
-        }
+    protected virtual string GetLogMessage(Exception exception)
+    {
+        ArgumentGuard.NotNull(exception, nameof(exception));
 
-        protected virtual LogLevel GetLogLevel(Exception exception)
-        {
-            ArgumentGuard.NotNull(exception, nameof(exception));
+        return exception is JsonApiException jsonApiException ? jsonApiException.GetSummary() : exception.Message;
+    }
 
-            if (exception is OperationCanceledException)
+    protected virtual IReadOnlyList<ErrorObject> CreateErrorResponse(Exception exception)
+    {
+        ArgumentGuard.NotNull(exception, nameof(exception));
+
+        IReadOnlyList<ErrorObject> errors = exception is JsonApiException jsonApiException ? jsonApiException.Errors :
+            exception is OperationCanceledException ? new ErrorObject((HttpStatusCode)499)
             {
-                return LogLevel.None;
-            }
-
-            if (exception is JsonApiException)
+                Title = "Request execution was canceled."
+            }.AsArray() : new ErrorObject(HttpStatusCode.InternalServerError)
             {
-                return LogLevel.Information;
-            }
+                Title = "An unhandled error occurred while processing this request.",
+                Detail = exception.Message
+            }.AsArray();
 
-            return LogLevel.Error;
+        if (_options.IncludeExceptionStackTraceInErrors && exception is not InvalidModelStateException)
+        {
+            IncludeStackTraces(exception, errors);
         }
 
-        protected virtual string GetLogMessage(Exception exception)
+        return errors;
+    }
+
+    private void IncludeStackTraces(Exception exception, IReadOnlyList<ErrorObject> errors)
+    {
+        string[] stackTraceLines = exception.ToString().Split(Environment.NewLine);
+
+        if (stackTraceLines.Any())
         {
-            ArgumentGuard.NotNull(exception, nameof(exception));
-
-            return exception.Message;
-        }
-
-        protected virtual ErrorDocument CreateErrorDocument(Exception exception)
-        {
-            ArgumentGuard.NotNull(exception, nameof(exception));
-
-            IReadOnlyList<Error> errors = exception is JsonApiException jsonApiException ? jsonApiException.Errors :
-                exception is OperationCanceledException ? new Error((HttpStatusCode)499)
-                {
-                    Title = "Request execution was canceled."
-                }.AsArray() : new Error(HttpStatusCode.InternalServerError)
-                {
-                    Title = "An unhandled error occurred while processing this request.",
-                    Detail = exception.Message
-                }.AsArray();
-
-            foreach (Error error in errors)
+            foreach (ErrorObject error in errors)
             {
-                ApplyOptions(error, exception);
+                error.Meta ??= new Dictionary<string, object?>();
+                error.Meta["StackTrace"] = stackTraceLines;
             }
-
-            return new ErrorDocument(errors);
-        }
-
-        private void ApplyOptions(Error error, Exception exception)
-        {
-            Exception resultException = exception is InvalidModelStateException ? null : exception;
-
-            error.Meta.IncludeExceptionStackTrace(_options.IncludeExceptionStackTraceInErrors ? resultException : null);
         }
     }
 }

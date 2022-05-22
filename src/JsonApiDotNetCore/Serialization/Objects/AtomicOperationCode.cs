@@ -1,16 +1,14 @@
-using Newtonsoft.Json;
-using Newtonsoft.Json.Converters;
+using System.Text.Json.Serialization;
 
-namespace JsonApiDotNetCore.Serialization.Objects
+namespace JsonApiDotNetCore.Serialization.Objects;
+
+/// <summary>
+/// See "op" in https://jsonapi.org/ext/atomic/#operation-objects.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum AtomicOperationCode
 {
-    /// <summary>
-    /// See https://jsonapi.org/ext/atomic/#operation-objects.
-    /// </summary>
-    [JsonConverter(typeof(StringEnumConverter))]
-    public enum AtomicOperationCode
-    {
-        Add,
-        Update,
-        Remove
-    }
+    Add,
+    Update,
+    Remove
 }

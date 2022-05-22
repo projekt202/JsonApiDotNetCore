@@ -1,67 +1,62 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Queries.Expressions;
 using JsonApiDotNetCore.Resources.Annotations;
 
-namespace JsonApiDotNetCore.Queries.Internal.Parsing
+namespace JsonApiDotNetCore.Queries.Internal.Parsing;
+
+[PublicAPI]
+public class SparseFieldSetParser : QueryExpressionParser
 {
-    [PublicAPI]
-    public class SparseFieldSetParser : QueryExpressionParser
+    private readonly Action<ResourceFieldAttribute, ResourceType, string>? _validateSingleFieldCallback;
+    private ResourceType? _resourceType;
+
+    public SparseFieldSetParser(Action<ResourceFieldAttribute, ResourceType, string>? validateSingleFieldCallback = null)
     {
-        private readonly Action<ResourceFieldAttribute, ResourceContext, string> _validateSingleFieldCallback;
-        private ResourceContext _resourceContext;
+        _validateSingleFieldCallback = validateSingleFieldCallback;
+    }
 
-        public SparseFieldSetParser(IResourceContextProvider resourceContextProvider,
-            Action<ResourceFieldAttribute, ResourceContext, string> validateSingleFieldCallback = null)
-            : base(resourceContextProvider)
+    public SparseFieldSetExpression? Parse(string source, ResourceType resourceType)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        _resourceType = resourceType;
+
+        Tokenize(source);
+
+        SparseFieldSetExpression? expression = ParseSparseFieldSet();
+
+        AssertTokenStackIsEmpty();
+
+        return expression;
+    }
+
+    protected SparseFieldSetExpression? ParseSparseFieldSet()
+    {
+        ImmutableHashSet<ResourceFieldAttribute>.Builder fieldSetBuilder = ImmutableHashSet.CreateBuilder<ResourceFieldAttribute>();
+
+        while (TokenStack.Any())
         {
-            _validateSingleFieldCallback = validateSingleFieldCallback;
-        }
-
-        public SparseFieldSetExpression Parse(string source, ResourceContext resourceContext)
-        {
-            ArgumentGuard.NotNull(resourceContext, nameof(resourceContext));
-
-            _resourceContext = resourceContext;
-
-            Tokenize(source);
-
-            SparseFieldSetExpression expression = ParseSparseFieldSet();
-
-            AssertTokenStackIsEmpty();
-
-            return expression;
-        }
-
-        protected SparseFieldSetExpression ParseSparseFieldSet()
-        {
-            var fields = new Dictionary<string, ResourceFieldAttribute>();
-
-            while (TokenStack.Any())
+            if (fieldSetBuilder.Count > 0)
             {
-                if (fields.Count > 0)
-                {
-                    EatSingleCharacterToken(TokenKind.Comma);
-                }
-
-                ResourceFieldChainExpression nextChain = ParseFieldChain(FieldChainRequirements.EndsInAttribute, "Field name expected.");
-                ResourceFieldAttribute nextField = nextChain.Fields.Single();
-                fields[nextField.PublicName] = nextField;
+                EatSingleCharacterToken(TokenKind.Comma);
             }
 
-            return fields.Any() ? new SparseFieldSetExpression(fields.Values) : null;
+            ResourceFieldChainExpression nextChain = ParseFieldChain(FieldChainRequirements.EndsInAttribute, "Field name expected.");
+            ResourceFieldAttribute nextField = nextChain.Fields.Single();
+            fieldSetBuilder.Add(nextField);
         }
 
-        protected override IReadOnlyCollection<ResourceFieldAttribute> OnResolveFieldChain(string path, FieldChainRequirements chainRequirements)
-        {
-            ResourceFieldAttribute field = ChainResolver.GetField(path, _resourceContext, path);
+        return fieldSetBuilder.Any() ? new SparseFieldSetExpression(fieldSetBuilder.ToImmutable()) : null;
+    }
 
-            _validateSingleFieldCallback?.Invoke(field, _resourceContext, path);
+    protected override IImmutableList<ResourceFieldAttribute> OnResolveFieldChain(string path, FieldChainRequirements chainRequirements)
+    {
+        ResourceFieldAttribute field = ChainResolver.GetField(path, _resourceType!, path);
 
-            return field.AsArray();
-        }
+        _validateSingleFieldCallback?.Invoke(field, _resourceType!, path);
+
+        return ImmutableArray.Create(field);
     }
 }

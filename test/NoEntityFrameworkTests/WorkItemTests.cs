@@ -1,149 +1,167 @@
-using System;
 using System.Net;
-using System.Net.Http;
-using System.Threading.Tasks;
+using System.Text.Json;
 using FluentAssertions;
+using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Serialization.Objects;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using NoEntityFrameworkExample;
 using NoEntityFrameworkExample.Data;
 using NoEntityFrameworkExample.Models;
 using TestBuildingBlocks;
 using Xunit;
 
-namespace NoEntityFrameworkTests
+namespace NoEntityFrameworkTests;
+
+public sealed class WorkItemTests : IntegrationTest, IClassFixture<WebApplicationFactory<WorkItem>>
 {
-    public sealed class WorkItemTests : IntegrationTest, IClassFixture<WebApplicationFactory<Startup>>
+    private readonly WebApplicationFactory<WorkItem> _factory;
+
+    protected override JsonSerializerOptions SerializerOptions
     {
-        private readonly WebApplicationFactory<Startup> _factory;
-
-        public WorkItemTests(WebApplicationFactory<Startup> factory)
+        get
         {
-            _factory = factory;
+            var options = _factory.Services.GetRequiredService<IJsonApiOptions>();
+            return options.SerializerOptions;
         }
+    }
 
-        [Fact]
-        public async Task Can_get_WorkItems()
+    public WorkItemTests(WebApplicationFactory<WorkItem> factory)
+    {
+        _factory = factory;
+    }
+
+    [Fact]
+    public async Task Can_get_WorkItems()
+    {
+        var workItem = new WorkItem
         {
-            // Arrange
-            await RunOnDatabaseAsync(async dbContext =>
-            {
-                dbContext.WorkItems.Add(new WorkItem());
-                await dbContext.SaveChangesAsync();
-            });
+            Title = "Write some code."
+        };
 
-            const string route = "/api/v1/workItems";
-
-            // Act
-            (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
-
-            // Assert
-            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
-
-            responseDocument.ManyData.Should().NotBeEmpty();
-        }
-
-        [Fact]
-        public async Task Can_get_WorkItem_by_ID()
+        // Arrange
+        await RunOnDatabaseAsync(async dbContext =>
         {
-            // Arrange
-            var workItem = new WorkItem();
+            dbContext.WorkItems.Add(workItem);
+            await dbContext.SaveChangesAsync();
+        });
 
-            await RunOnDatabaseAsync(async dbContext =>
-            {
-                dbContext.WorkItems.Add(workItem);
-                await dbContext.SaveChangesAsync();
-            });
+        const string route = "/api/v1/workItems";
 
-            string route = "/api/v1/workItems/" + workItem.StringId;
+        // Act
+        (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
 
-            // Act
-            (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
+        // Assert
+        httpResponse.ShouldHaveStatusCode(HttpStatusCode.OK);
 
-            // Assert
-            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+        responseDocument.Data.ManyValue.ShouldNotBeEmpty();
+    }
 
-            responseDocument.SingleData.Should().NotBeNull();
-            responseDocument.SingleData.Id.Should().Be(workItem.StringId);
-        }
-
-        [Fact]
-        public async Task Can_create_WorkItem()
+    [Fact]
+    public async Task Can_get_WorkItem_by_ID()
+    {
+        // Arrange
+        var workItem = new WorkItem
         {
-            // Arrange
-            var newWorkItem = new WorkItem
-            {
-                IsBlocked = true,
-                Title = "Some",
-                DurationInHours = 2,
-                ProjectId = Guid.NewGuid()
-            };
+            Title = "Write some code."
+        };
 
-            var requestBody = new
+        await RunOnDatabaseAsync(async dbContext =>
+        {
+            dbContext.WorkItems.Add(workItem);
+            await dbContext.SaveChangesAsync();
+        });
+
+        string route = $"/api/v1/workItems/{workItem.StringId}";
+
+        // Act
+        (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
+
+        // Assert
+        httpResponse.ShouldHaveStatusCode(HttpStatusCode.OK);
+
+        responseDocument.Data.SingleValue.ShouldNotBeNull();
+        responseDocument.Data.SingleValue.Id.Should().Be(workItem.StringId);
+    }
+
+    [Fact]
+    public async Task Can_create_WorkItem()
+    {
+        // Arrange
+        var newWorkItem = new WorkItem
+        {
+            IsBlocked = true,
+            Title = "Some",
+            DurationInHours = 2,
+            ProjectId = Guid.NewGuid()
+        };
+
+        var requestBody = new
+        {
+            data = new
             {
-                data = new
+                type = "workItems",
+                attributes = new
                 {
-                    type = "workItems",
-                    attributes = new
-                    {
-                        isBlocked = newWorkItem.IsBlocked,
-                        title = newWorkItem.Title,
-                        durationInHours = newWorkItem.DurationInHours,
-                        projectId = newWorkItem.ProjectId
-                    }
+                    isBlocked = newWorkItem.IsBlocked,
+                    title = newWorkItem.Title,
+                    durationInHours = newWorkItem.DurationInHours,
+                    projectId = newWorkItem.ProjectId
                 }
-            };
+            }
+        };
 
-            const string route = "/api/v1/workItems/";
+        const string route = "/api/v1/workItems/";
 
-            // Act
-            (HttpResponseMessage httpResponse, Document responseDocument) = await ExecutePostAsync<Document>(route, requestBody);
+        // Act
+        (HttpResponseMessage httpResponse, Document responseDocument) = await ExecutePostAsync<Document>(route, requestBody);
 
-            // Assert
-            httpResponse.Should().HaveStatusCode(HttpStatusCode.Created);
+        // Assert
+        httpResponse.ShouldHaveStatusCode(HttpStatusCode.Created);
 
-            responseDocument.SingleData.Should().NotBeNull();
-            responseDocument.SingleData.Attributes["isBlocked"].Should().Be(newWorkItem.IsBlocked);
-            responseDocument.SingleData.Attributes["title"].Should().Be(newWorkItem.Title);
-            responseDocument.SingleData.Attributes["durationInHours"].Should().Be(newWorkItem.DurationInHours);
-            responseDocument.SingleData.Attributes["projectId"].Should().Be(newWorkItem.ProjectId.ToString());
-        }
+        responseDocument.Data.SingleValue.ShouldNotBeNull();
+        responseDocument.Data.SingleValue.Attributes.ShouldNotBeEmpty();
+        responseDocument.Data.SingleValue.Attributes.ShouldContainKey("isBlocked").With(value => value.Should().Be(newWorkItem.IsBlocked));
+        responseDocument.Data.SingleValue.Attributes.ShouldContainKey("title").With(value => value.Should().Be(newWorkItem.Title));
+        responseDocument.Data.SingleValue.Attributes.ShouldContainKey("durationInHours").With(value => value.Should().Be(newWorkItem.DurationInHours));
+        responseDocument.Data.SingleValue.Attributes.ShouldContainKey("projectId").With(value => value.Should().Be(newWorkItem.ProjectId));
+    }
 
-        [Fact]
-        public async Task Can_delete_WorkItem()
+    [Fact]
+    public async Task Can_delete_WorkItem()
+    {
+        // Arrange
+        var workItem = new WorkItem
         {
-            // Arrange
-            var workItem = new WorkItem();
+            Title = "Write some code."
+        };
 
-            await RunOnDatabaseAsync(async dbContext =>
-            {
-                dbContext.WorkItems.Add(workItem);
-                await dbContext.SaveChangesAsync();
-            });
-
-            string route = "/api/v1/workItems/" + workItem.StringId;
-
-            // Act
-            (HttpResponseMessage httpResponse, string responseDocument) = await ExecuteDeleteAsync<string>(route);
-
-            // Assert
-            httpResponse.Should().HaveStatusCode(HttpStatusCode.NoContent);
-
-            responseDocument.Should().BeEmpty();
-        }
-
-        protected override HttpClient CreateClient()
+        await RunOnDatabaseAsync(async dbContext =>
         {
-            return _factory.CreateClient();
-        }
+            dbContext.WorkItems.Add(workItem);
+            await dbContext.SaveChangesAsync();
+        });
 
-        private async Task RunOnDatabaseAsync(Func<AppDbContext, Task> asyncAction)
-        {
-            using IServiceScope scope = _factory.Services.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        string route = $"/api/v1/workItems/{workItem.StringId}";
 
-            await asyncAction(dbContext);
-        }
+        // Act
+        (HttpResponseMessage httpResponse, string responseDocument) = await ExecuteDeleteAsync<string>(route);
+
+        // Assert
+        httpResponse.ShouldHaveStatusCode(HttpStatusCode.NoContent);
+
+        responseDocument.Should().BeEmpty();
+    }
+
+    protected override HttpClient CreateClient()
+    {
+        return _factory.CreateClient();
+    }
+
+    private async Task RunOnDatabaseAsync(Func<AppDbContext, Task> asyncAction)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await asyncAction(dbContext);
     }
 }

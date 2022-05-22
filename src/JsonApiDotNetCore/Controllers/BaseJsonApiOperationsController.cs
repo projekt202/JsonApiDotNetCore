@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.AtomicOperations;
 using JsonApiDotNetCore.Configuration;
@@ -13,189 +8,198 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.Logging;
 
-namespace JsonApiDotNetCore.Controllers
+namespace JsonApiDotNetCore.Controllers;
+
+/// <summary>
+/// Implements the foundational ASP.NET controller layer in the JsonApiDotNetCore architecture for handling atomic:operations requests. See
+/// https://jsonapi.org/ext/atomic/ for details. Delegates work to <see cref="IOperationsProcessor" />.
+/// </summary>
+[PublicAPI]
+public abstract class BaseJsonApiOperationsController : CoreJsonApiController
 {
-    /// <summary>
-    /// Implements the foundational ASP.NET Core controller layer in the JsonApiDotNetCore architecture for handling atomic:operations requests. See
-    /// https://jsonapi.org/ext/atomic/ for details. Delegates work to <see cref="IOperationsProcessor" />.
-    /// </summary>
-    [PublicAPI]
-    public abstract class BaseJsonApiOperationsController : CoreJsonApiController
+    private readonly IJsonApiOptions _options;
+    private readonly IResourceGraph _resourceGraph;
+    private readonly IOperationsProcessor _processor;
+    private readonly IJsonApiRequest _request;
+    private readonly ITargetedFields _targetedFields;
+    private readonly TraceLogWriter<BaseJsonApiOperationsController> _traceWriter;
+
+    protected BaseJsonApiOperationsController(IJsonApiOptions options, IResourceGraph resourceGraph, ILoggerFactory loggerFactory,
+        IOperationsProcessor processor, IJsonApiRequest request, ITargetedFields targetedFields)
     {
-        private readonly IJsonApiOptions _options;
-        private readonly IOperationsProcessor _processor;
-        private readonly IJsonApiRequest _request;
-        private readonly ITargetedFields _targetedFields;
-        private readonly TraceLogWriter<BaseJsonApiOperationsController> _traceWriter;
+        ArgumentGuard.NotNull(options, nameof(options));
+        ArgumentGuard.NotNull(resourceGraph, nameof(resourceGraph));
+        ArgumentGuard.NotNull(loggerFactory, nameof(loggerFactory));
+        ArgumentGuard.NotNull(processor, nameof(processor));
+        ArgumentGuard.NotNull(request, nameof(request));
+        ArgumentGuard.NotNull(targetedFields, nameof(targetedFields));
 
-        protected BaseJsonApiOperationsController(IJsonApiOptions options, ILoggerFactory loggerFactory, IOperationsProcessor processor,
-            IJsonApiRequest request, ITargetedFields targetedFields)
+        _options = options;
+        _resourceGraph = resourceGraph;
+        _processor = processor;
+        _request = request;
+        _targetedFields = targetedFields;
+        _traceWriter = new TraceLogWriter<BaseJsonApiOperationsController>(loggerFactory);
+    }
+
+    /// <summary>
+    /// Atomically processes a list of operations and returns a list of results. All changes are reverted if processing fails. If processing succeeds but
+    /// none of the operations returns any data, then HTTP 201 is returned instead of 200.
+    /// </summary>
+    /// <example>
+    /// The next example creates a new resource.
+    /// <code><![CDATA[
+    /// POST /operations HTTP/1.1
+    /// Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
+    /// 
+    /// {
+    ///   "atomic:operations": [{
+    ///     "op": "add",
+    ///     "data": {
+    ///       "type": "authors",
+    ///       "attributes": {
+    ///         "name": "John Doe"
+    ///       }
+    ///     }
+    ///   }]
+    /// }
+    /// ]]></code>
+    /// </example>
+    /// <example>
+    /// The next example updates an existing resource.
+    /// <code><![CDATA[
+    /// POST /operations HTTP/1.1
+    /// Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
+    /// 
+    /// {
+    ///   "atomic:operations": [{
+    ///     "op": "update",
+    ///     "data": {
+    ///       "type": "authors",
+    ///       "id": 1,
+    ///       "attributes": {
+    ///         "name": "Jane Doe"
+    ///       }
+    ///     }
+    ///   }]
+    /// }
+    /// ]]></code>
+    /// </example>
+    /// <example>
+    /// The next example deletes an existing resource.
+    /// <code><![CDATA[
+    /// POST /operations HTTP/1.1
+    /// Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
+    /// 
+    /// {
+    ///   "atomic:operations": [{
+    ///     "op": "remove",
+    ///     "ref": {
+    ///       "type": "authors",
+    ///       "id": 1
+    ///     }
+    ///   }]
+    /// }
+    /// ]]></code>
+    /// </example>
+    public virtual async Task<IActionResult> PostOperationsAsync([FromBody] IList<OperationContainer> operations, CancellationToken cancellationToken)
+    {
+        _traceWriter.LogMethodStart(new
         {
-            ArgumentGuard.NotNull(options, nameof(options));
-            ArgumentGuard.NotNull(loggerFactory, nameof(loggerFactory));
-            ArgumentGuard.NotNull(processor, nameof(processor));
-            ArgumentGuard.NotNull(request, nameof(request));
-            ArgumentGuard.NotNull(targetedFields, nameof(targetedFields));
+            operations
+        });
 
-            _options = options;
-            _processor = processor;
-            _request = request;
-            _targetedFields = targetedFields;
-            _traceWriter = new TraceLogWriter<BaseJsonApiOperationsController>(loggerFactory);
+        ArgumentGuard.NotNull(operations, nameof(operations));
+
+        if (_options.ValidateModelState)
+        {
+            ValidateModelState(operations);
         }
 
-        /// <summary>
-        /// Atomically processes a list of operations and returns a list of results. All changes are reverted if processing fails. If processing succeeds but
-        /// none of the operations returns any data, then HTTP 201 is returned instead of 200.
-        /// </summary>
-        /// <example>
-        /// The next example creates a new resource.
-        /// <code><![CDATA[
-        /// POST /operations HTTP/1.1
-        /// Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
-        /// 
-        /// {
-        ///   "atomic:operations": [{
-        ///     "op": "add",
-        ///     "data": {
-        ///       "type": "authors",
-        ///       "attributes": {
-        ///         "name": "John Doe"
-        ///       }
-        ///     }
-        ///   }]
-        /// }
-        /// ]]></code>
-        /// </example>
-        /// <example>
-        /// The next example updates an existing resource.
-        /// <code><![CDATA[
-        /// POST /operations HTTP/1.1
-        /// Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
-        /// 
-        /// {
-        ///   "atomic:operations": [{
-        ///     "op": "update",
-        ///     "data": {
-        ///       "type": "authors",
-        ///       "id": 1,
-        ///       "attributes": {
-        ///         "name": "Jane Doe"
-        ///       }
-        ///     }
-        ///   }]
-        /// }
-        /// ]]></code>
-        /// </example>
-        /// <example>
-        /// The next example deletes an existing resource.
-        /// <code><![CDATA[
-        /// POST /operations HTTP/1.1
-        /// Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
-        /// 
-        /// {
-        ///   "atomic:operations": [{
-        ///     "op": "remove",
-        ///     "ref": {
-        ///       "type": "authors",
-        ///       "id": 1
-        ///     }
-        ///   }]
-        /// }
-        /// ]]></code>
-        /// </example>
-        public virtual async Task<IActionResult> PostOperationsAsync([FromBody] IList<OperationContainer> operations, CancellationToken cancellationToken)
+        IList<OperationContainer?> results = await _processor.ProcessAsync(operations, cancellationToken);
+        return results.Any(result => result != null) ? Ok(results) : NoContent();
+    }
+
+    protected virtual void ValidateModelState(IList<OperationContainer> operations)
+    {
+        // We must validate the resource inside each operation manually, because they are typed as IIdentifiable.
+        // Instead of validating IIdentifiable we need to validate the resource runtime-type.
+
+        using IDisposable _ = new RevertRequestStateOnDispose(_request, _targetedFields);
+
+        int operationIndex = 0;
+        var requestModelState = new List<(string key, ModelStateEntry? entry)>();
+        int maxErrorsRemaining = ModelState.MaxAllowedErrors;
+
+        foreach (OperationContainer operation in operations)
         {
-            _traceWriter.LogMethodStart(new
+            if (maxErrorsRemaining < 1)
             {
-                operations
-            });
-
-            ArgumentGuard.NotNull(operations, nameof(operations));
-
-            ValidateClientGeneratedIds(operations);
-
-            if (_options.ValidateModelState)
-            {
-                ValidateModelState(operations);
+                break;
             }
 
-            IList<OperationContainer> results = await _processor.ProcessAsync(operations, cancellationToken);
-            return results.Any(result => result != null) ? (IActionResult)Ok(results) : NoContent();
+            maxErrorsRemaining = ValidateOperation(operation, operationIndex, requestModelState, maxErrorsRemaining);
+
+            operationIndex++;
         }
 
-        protected virtual void ValidateClientGeneratedIds(IEnumerable<OperationContainer> operations)
+        if (requestModelState.Any())
         {
-            if (!_options.AllowClientGeneratedIds)
-            {
-                int index = 0;
+            Dictionary<string, ModelStateEntry?> modelStateDictionary = requestModelState.ToDictionary(tuple => tuple.key, tuple => tuple.entry);
 
-                foreach (OperationContainer operation in operations)
+            throw new InvalidModelStateException(modelStateDictionary, typeof(IList<OperationContainer>), _options.IncludeExceptionStackTraceInErrors,
+                _resourceGraph,
+                (collectionType, index) => collectionType == typeof(IList<OperationContainer>) ? operations[index].Resource.GetClrType() : null);
+        }
+    }
+
+    private int ValidateOperation(OperationContainer operation, int operationIndex, List<(string key, ModelStateEntry? entry)> requestModelState,
+        int maxErrorsRemaining)
+    {
+        if (operation.Request.WriteOperation is WriteOperationKind.CreateResource or WriteOperationKind.UpdateResource)
+        {
+            _targetedFields.CopyFrom(operation.TargetedFields);
+            _request.CopyFrom(operation.Request);
+
+            var validationContext = new ActionContext
+            {
+                ModelState =
                 {
-                    if (operation.Kind == OperationKind.CreateResource && operation.Resource.StringId != null)
-                    {
-                        throw new ResourceIdInCreateResourceNotAllowedException(index);
-                    }
-
-                    index++;
+                    MaxAllowedErrors = maxErrorsRemaining
                 }
-            }
-        }
+            };
 
-        protected virtual void ValidateModelState(IEnumerable<OperationContainer> operations)
-        {
-            // We must validate the resource inside each operation manually, because they are typed as IIdentifiable.
-            // Instead of validating IIdentifiable we need to validate the resource runtime-type.
+            ObjectValidator.Validate(validationContext, null, string.Empty, operation.Resource);
 
-            var violations = new List<ModelStateViolation>();
-
-            int index = 0;
-
-            foreach (OperationContainer operation in operations)
+            if (!validationContext.ModelState.IsValid)
             {
-                if (operation.Kind == OperationKind.CreateResource || operation.Kind == OperationKind.UpdateResource)
+                int errorsRemaining = maxErrorsRemaining;
+
+                foreach (string key in validationContext.ModelState.Keys)
                 {
-                    _targetedFields.Attributes = operation.TargetedFields.Attributes;
-                    _targetedFields.Relationships = operation.TargetedFields.Relationships;
+                    ModelStateEntry entry = validationContext.ModelState[key]!;
 
-                    _request.CopyFrom(operation.Request);
-
-                    var validationContext = new ActionContext();
-                    ObjectValidator.Validate(validationContext, null, string.Empty, operation.Resource);
-
-                    if (!validationContext.ModelState.IsValid)
+                    if (entry.ValidationState == ModelValidationState.Invalid)
                     {
-                        AddValidationErrors(validationContext.ModelState, operation.Resource.GetType(), index, violations);
+                        string operationKey = $"[{operationIndex}].{nameof(OperationContainer.Resource)}.{key}";
+
+                        if (entry.Errors.Count > 0 && entry.Errors[0].Exception is TooManyModelErrorsException)
+                        {
+                            requestModelState.Insert(0, (operationKey, entry));
+                        }
+                        else
+                        {
+                            requestModelState.Add((operationKey, entry));
+                        }
+
+                        errorsRemaining -= entry.Errors.Count;
                     }
                 }
 
-                index++;
-            }
-
-            if (violations.Any())
-            {
-                throw new InvalidModelStateException(violations, _options.IncludeExceptionStackTraceInErrors, _options.SerializerNamingStrategy);
+                return errorsRemaining;
             }
         }
 
-        private static void AddValidationErrors(ModelStateDictionary modelState, Type resourceType, int operationIndex, List<ModelStateViolation> violations)
-        {
-            foreach ((string propertyName, ModelStateEntry entry) in modelState)
-            {
-                AddValidationErrors(entry, propertyName, resourceType, operationIndex, violations);
-            }
-        }
-
-        private static void AddValidationErrors(ModelStateEntry entry, string propertyName, Type resourceType, int operationIndex,
-            List<ModelStateViolation> violations)
-        {
-            foreach (ModelError error in entry.Errors)
-            {
-                string prefix = $"/atomic:operations[{operationIndex}]/data/attributes/";
-                var violation = new ModelStateViolation(prefix, propertyName, resourceType, error);
-
-                violations.Add(violation);
-            }
-        }
+        return maxErrorsRemaining;
     }
 }

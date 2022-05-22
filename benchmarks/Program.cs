@@ -1,23 +1,23 @@
 using BenchmarkDotNet.Running;
-using Benchmarks.LinkBuilder;
-using Benchmarks.Query;
+using Benchmarks.Deserialization;
+using Benchmarks.QueryString;
 using Benchmarks.Serialization;
 
-namespace Benchmarks
-{
-    internal static class Program
-    {
-        private static void Main(string[] args)
-        {
-            var switcher = new BenchmarkSwitcher(new[]
-            {
-                typeof(JsonApiDeserializerBenchmarks),
-                typeof(JsonApiSerializerBenchmarks),
-                typeof(QueryParserBenchmarks),
-                typeof(LinkBuilderGetNamespaceFromPathBenchmarks)
-            });
+namespace Benchmarks;
 
-            switcher.Run(args);
-        }
+internal static class Program
+{
+    private static void Main(string[] args)
+    {
+        var switcher = new BenchmarkSwitcher(new[]
+        {
+            typeof(ResourceDeserializationBenchmarks),
+            typeof(OperationsDeserializationBenchmarks),
+            typeof(ResourceSerializationBenchmarks),
+            typeof(OperationsSerializationBenchmarks),
+            typeof(QueryStringParserBenchmarks)
+        });
+
+        switcher.Run(args);
     }
 }

@@ -1,10 +1,10 @@
 image:
   - Ubuntu
-  - Visual Studio 2019
+  - Visual Studio 2022
 
 version: '{build}'
 
-stack: postgresql
+stack: postgresql 13.4
 
 environment:
   PGUSER: postgres
@@ -32,9 +32,9 @@ for:
 -
   matrix:
     only:
-    - image: Visual Studio 2019
+    - image: Visual Studio 2022
   services:
-  - postgresql101
+  - postgresql13
   # REF: https://github.com/docascode/docfx-seed/blob/master/appveyor.yml
   before_build:
     - pwsh: |
@@ -43,6 +43,9 @@ for:
             git checkout $env:APPVEYOR_REPO_BRANCH -q
         }
         choco install docfx -y
+        if ($lastexitcode -ne 0) {
+            throw "docfx install failed with exit code $lastexitcode."
+        }
   after_build:
     - pwsh: |
         CD ./docs
@@ -79,20 +82,31 @@ for:
   - provider: NuGet
     skip_symbols: false
     api_key:
-      secure: OBYPCgp3WCuwkDRMuZ9a4QcBdTja/lqlUwZ+Yl5VHqooSJRVTYKP5y15XK0fuHsZ
+      secure: S9fkLwmhi7w+DGouXYqYq/1PGocnYo8UBUKwv+BGpWHnzE6yHZEYth3j/XJ9Ydsa
     on:
       branch: master
       appveyor_repo_tag: true
   - provider: NuGet
     skip_symbols: false
     api_key:
-      secure: OBYPCgp3WCuwkDRMuZ9a4QcBdTja/lqlUwZ+Yl5VHqooSJRVTYKP5y15XK0fuHsZ
+      secure: S9fkLwmhi7w+DGouXYqYq/1PGocnYo8UBUKwv+BGpWHnzE6yHZEYth3j/XJ9Ydsa
     on:
       branch: /release\/.+/
       appveyor_repo_tag: true
 
 build_script:
-- pwsh: dotnet --version
-- pwsh: .\Build.ps1
+- pwsh: |
+    Write-Output ".NET version:"
+    dotnet --version
+
+    Write-Output "PostgreSQL version:"
+    if ($IsWindows) {
+        . "${env:ProgramFiles}\PostgreSQL\13\bin\psql" --version
+    }
+    else {
+        psql --version
+    }
+
+    .\Build.ps1
 
 test: off

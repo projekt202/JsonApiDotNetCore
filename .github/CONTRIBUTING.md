@@ -34,7 +34,7 @@ Explain the problem and include additional details to help maintainers reproduce
 This section guides you through submitting an enhancement suggestion, including completely new features and minor improvements to existing functionality. Following these guidelines helps maintainers and the community understand your suggestion and find related suggestions.
 
 Before creating enhancement suggestions:
-- Check the [documentation](https://www.jsonapi.net/usage/resources/index.html) and [integration tests](https://github.com/json-api-dotnet/JsonApiDotNetCore/tree/master/test/JsonApiDotNetCoreExampleTests/IntegrationTests) for existing features. You might discover the enhancement is already available.
+- Check the [documentation](https://www.jsonapi.net/usage/resources/index.html) and [integration tests](https://github.com/json-api-dotnet/JsonApiDotNetCore/tree/master/test/JsonApiDotNetCoreTests/IntegrationTests) for existing features. You might discover the enhancement is already available.
 - Perform a search to see if the feature has already been reported. If it has and the issue is still open, add a comment to the existing issue instead of opening a new one.
 
 When you are creating an enhancement suggestion, please include as many details as possible. Fill in the template, including the steps that you imagine you would take if the feature you're requesting existed.
@@ -60,8 +60,8 @@ Please follow these steps to have your contribution considered by the maintainer
 
 We use [CSharpGuidelines](https://csharpcodingguidelines.com/) as our coding standard (with a few minor exceptions). Coding style is validated during PR build, where we inject an extra settings layer that promotes various suggestions to warning level. This ensures a high-quality codebase without interfering too much when editing code.
 You can run the following [PowerShell scripts](https://github.com/PowerShell/PowerShell/releases) locally:
-- `inspectcode.ps1`: Scans the code for style violations and opens the result in your web browser.
-- `cleanupcode.ps1` Reformats the entire codebase to match with our configured style.
+- `pwsh inspectcode.ps1`: Scans the code for style violations and opens the result in your web browser.
+- `pwsh cleanupcode.ps1`: Reformats the entire codebase to match with our configured style.
 
 Code inspection violations can be addressed in several ways, depending on the situation:
 - Types that are reported to be never instantiated (because the IoC container creates them dynamically) should be decorated with `[UsedImplicitly(ImplicitUseKindFlags.InstantiatedNoFixedConstructorSignature)]`.
@@ -88,6 +88,14 @@ public sealed class AppDbContext : DbContext
 }
 ```
 
+## Creating a release (for maintainers)
+
+- Verify documentation is up-to-date
+- Bump the package version in Directory.Build.props
+- Create a GitHub release
+- Update https://github.com/json-api-dotnet/JsonApiDotNetCore.MongoDb to consume the new version and release
+- Create a new branch in https://github.com/json-api-dotnet/MigrationGuide and update README.md in master
+
 ## Backporting and hotfixes (for maintainers)
 
 - Checkout the version you want to apply the feature on top of and create a new branch to release the new version:
@@ -95,8 +103,8 @@ public sealed class AppDbContext : DbContext
   git checkout tags/v2.5.1 -b release/2.5.2
   ```
 - Cherrypick the merge commit: `git cherry-pick {git commit SHA}`
-- Bump the package version in the csproj
-- Make any other compatibility, documentation or tooling related changes
+- Bump the package version in Directory.Build.props
+- Make any other compatibility, documentation, or tooling related changes
 - Push the branch to origin and verify the build
 - Once the build is verified, create a GitHub release, tagging the release branch
 - Open a PR back to master with any other additions

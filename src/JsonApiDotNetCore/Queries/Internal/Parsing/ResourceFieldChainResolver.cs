@@ -1,268 +1,301 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
 using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Resources.Annotations;
 
-namespace JsonApiDotNetCore.Queries.Internal.Parsing
+namespace JsonApiDotNetCore.Queries.Internal.Parsing;
+
+/// <summary>
+/// Provides helper methods to resolve a chain of fields (relationships and attributes) from the resource graph.
+/// </summary>
+internal sealed class ResourceFieldChainResolver
 {
+    private static readonly ResourceFieldChainErrorFormatter ErrorFormatter = new();
+
     /// <summary>
-    /// Provides helper methods to resolve a chain of fields (relationships and attributes) from the resource graph.
+    /// Resolves a chain of to-one relationships.
+    /// <example>author</example>
+    /// <example>
+    /// author.address.country
+    /// </example>
     /// </summary>
-    internal sealed class ResourceFieldChainResolver
+    public IImmutableList<ResourceFieldAttribute> ResolveToOneChain(ResourceType resourceType, string path,
+        Action<ResourceFieldAttribute, ResourceType, string>? validateCallback = null)
     {
-        private readonly IResourceContextProvider _resourceContextProvider;
+        ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder = ImmutableArray.CreateBuilder<ResourceFieldAttribute>();
+        ResourceType nextResourceType = resourceType;
 
-        public ResourceFieldChainResolver(IResourceContextProvider resourceContextProvider)
+        foreach (string publicName in path.Split("."))
         {
-            ArgumentGuard.NotNull(resourceContextProvider, nameof(resourceContextProvider));
+            RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceType, path, FieldChainInheritanceRequirement.Disabled);
 
-            _resourceContextProvider = resourceContextProvider;
+            validateCallback?.Invoke(toOneRelationship, nextResourceType, path);
+
+            chainBuilder.Add(toOneRelationship);
+            nextResourceType = toOneRelationship.RightType;
         }
 
-        /// <summary>
-        /// Resolves a chain of relationships that ends in a to-many relationship, for example: blogs.owner.articles.comments
-        /// </summary>
-        public IReadOnlyCollection<ResourceFieldAttribute> ResolveToManyChain(ResourceContext resourceContext, string path,
-            Action<ResourceFieldAttribute, ResourceContext, string> validateCallback = null)
+        return chainBuilder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Resolves a chain of relationships that ends in a to-many relationship, for example: blogs.owner.articles.comments
+    /// </summary>
+    public IImmutableList<ResourceFieldAttribute> ResolveToManyChain(ResourceType resourceType, string path,
+        Action<ResourceFieldAttribute, ResourceType, string>? validateCallback = null)
+    {
+        ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder = ImmutableArray.CreateBuilder<ResourceFieldAttribute>();
+
+        string[] publicNameParts = path.Split(".");
+        ResourceType nextResourceType = resourceType;
+
+        foreach (string publicName in publicNameParts[..^1])
         {
-            var chain = new List<ResourceFieldAttribute>();
+            RelationshipAttribute relationship = GetRelationship(publicName, nextResourceType, path, FieldChainInheritanceRequirement.Disabled);
 
-            string[] publicNameParts = path.Split(".");
-            ResourceContext nextResourceContext = resourceContext;
+            validateCallback?.Invoke(relationship, nextResourceType, path);
 
-            foreach (string publicName in publicNameParts[..^1])
-            {
-                RelationshipAttribute relationship = GetRelationship(publicName, nextResourceContext, path);
-
-                validateCallback?.Invoke(relationship, nextResourceContext, path);
-
-                chain.Add(relationship);
-                nextResourceContext = _resourceContextProvider.GetResourceContext(relationship.RightType);
-            }
-
-            string lastName = publicNameParts[^1];
-            RelationshipAttribute lastToManyRelationship = GetToManyRelationship(lastName, nextResourceContext, path);
-
-            validateCallback?.Invoke(lastToManyRelationship, nextResourceContext, path);
-
-            chain.Add(lastToManyRelationship);
-            return chain;
+            chainBuilder.Add(relationship);
+            nextResourceType = relationship.RightType;
         }
 
-        /// <summary>
-        /// Resolves a chain of relationships.
-        /// <example>
-        /// blogs.articles.comments
-        /// </example>
-        /// <example>
-        /// author.address
-        /// </example>
-        /// <example>
-        /// articles.revisions.author
-        /// </example>
-        /// </summary>
-        public IReadOnlyCollection<ResourceFieldAttribute> ResolveRelationshipChain(ResourceContext resourceContext, string path,
-            Action<RelationshipAttribute, ResourceContext, string> validateCallback = null)
+        string lastName = publicNameParts[^1];
+        RelationshipAttribute lastToManyRelationship = GetToManyRelationship(lastName, nextResourceType, path, FieldChainInheritanceRequirement.Disabled);
+
+        validateCallback?.Invoke(lastToManyRelationship, nextResourceType, path);
+
+        chainBuilder.Add(lastToManyRelationship);
+        return chainBuilder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Resolves a chain of relationships.
+    /// <example>
+    /// blogs.articles.comments
+    /// </example>
+    /// <example>
+    /// author.address
+    /// </example>
+    /// <example>
+    /// articles.revisions.author
+    /// </example>
+    /// </summary>
+    public IImmutableList<ResourceFieldAttribute> ResolveRelationshipChain(ResourceType resourceType, string path,
+        Action<RelationshipAttribute, ResourceType, string>? validateCallback = null)
+    {
+        ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder = ImmutableArray.CreateBuilder<ResourceFieldAttribute>();
+        ResourceType nextResourceType = resourceType;
+
+        foreach (string publicName in path.Split("."))
         {
-            var chain = new List<ResourceFieldAttribute>();
-            ResourceContext nextResourceContext = resourceContext;
+            RelationshipAttribute relationship = GetRelationship(publicName, nextResourceType, path, FieldChainInheritanceRequirement.Disabled);
 
-            foreach (string publicName in path.Split("."))
-            {
-                RelationshipAttribute relationship = GetRelationship(publicName, nextResourceContext, path);
+            validateCallback?.Invoke(relationship, nextResourceType, path);
 
-                validateCallback?.Invoke(relationship, nextResourceContext, path);
-
-                chain.Add(relationship);
-                nextResourceContext = _resourceContextProvider.GetResourceContext(relationship.RightType);
-            }
-
-            return chain;
+            chainBuilder.Add(relationship);
+            nextResourceType = relationship.RightType;
         }
 
-        /// <summary>
-        /// Resolves a chain of to-one relationships that ends in an attribute.
-        /// <example>
-        /// author.address.country.name
-        /// </example>
-        /// <example>name</example>
-        /// </summary>
-        public IReadOnlyCollection<ResourceFieldAttribute> ResolveToOneChainEndingInAttribute(ResourceContext resourceContext, string path,
-            Action<ResourceFieldAttribute, ResourceContext, string> validateCallback = null)
+        return chainBuilder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Resolves a chain of to-one relationships that ends in an attribute.
+    /// <example>
+    /// author.address.country.name
+    /// </example>
+    /// <example>name</example>
+    /// </summary>
+    public IImmutableList<ResourceFieldAttribute> ResolveToOneChainEndingInAttribute(ResourceType resourceType, string path,
+        FieldChainInheritanceRequirement inheritanceRequirement, Action<ResourceFieldAttribute, ResourceType, string>? validateCallback = null)
+    {
+        ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder = ImmutableArray.CreateBuilder<ResourceFieldAttribute>();
+
+        string[] publicNameParts = path.Split(".");
+        ResourceType nextResourceType = resourceType;
+
+        foreach (string publicName in publicNameParts[..^1])
         {
-            var chain = new List<ResourceFieldAttribute>();
+            RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceType, path, inheritanceRequirement);
 
-            string[] publicNameParts = path.Split(".");
-            ResourceContext nextResourceContext = resourceContext;
+            validateCallback?.Invoke(toOneRelationship, nextResourceType, path);
 
-            foreach (string publicName in publicNameParts[..^1])
-            {
-                RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceContext, path);
-
-                validateCallback?.Invoke(toOneRelationship, nextResourceContext, path);
-
-                chain.Add(toOneRelationship);
-                nextResourceContext = _resourceContextProvider.GetResourceContext(toOneRelationship.RightType);
-            }
-
-            string lastName = publicNameParts[^1];
-            AttrAttribute lastAttribute = GetAttribute(lastName, nextResourceContext, path);
-
-            validateCallback?.Invoke(lastAttribute, nextResourceContext, path);
-
-            chain.Add(lastAttribute);
-            return chain;
+            chainBuilder.Add(toOneRelationship);
+            nextResourceType = toOneRelationship.RightType;
         }
 
-        /// <summary>
-        /// Resolves a chain of to-one relationships that ends in a to-many relationship.
-        /// <example>
-        /// article.comments
-        /// </example>
-        /// <example>
-        /// comments
-        /// </example>
-        /// </summary>
-        public IReadOnlyCollection<ResourceFieldAttribute> ResolveToOneChainEndingInToMany(ResourceContext resourceContext, string path,
-            Action<ResourceFieldAttribute, ResourceContext, string> validateCallback = null)
+        string lastName = publicNameParts[^1];
+        AttrAttribute lastAttribute = GetAttribute(lastName, nextResourceType, path, inheritanceRequirement);
+
+        validateCallback?.Invoke(lastAttribute, nextResourceType, path);
+
+        chainBuilder.Add(lastAttribute);
+        return chainBuilder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Resolves a chain of to-one relationships that ends in a to-many relationship.
+    /// <example>
+    /// article.comments
+    /// </example>
+    /// <example>
+    /// comments
+    /// </example>
+    /// </summary>
+    public IImmutableList<ResourceFieldAttribute> ResolveToOneChainEndingInToMany(ResourceType resourceType, string path,
+        FieldChainInheritanceRequirement inheritanceRequirement, Action<ResourceFieldAttribute, ResourceType, string>? validateCallback = null)
+    {
+        ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder = ImmutableArray.CreateBuilder<ResourceFieldAttribute>();
+
+        string[] publicNameParts = path.Split(".");
+        ResourceType nextResourceType = resourceType;
+
+        foreach (string publicName in publicNameParts[..^1])
         {
-            var chain = new List<ResourceFieldAttribute>();
+            RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceType, path, inheritanceRequirement);
 
-            string[] publicNameParts = path.Split(".");
-            ResourceContext nextResourceContext = resourceContext;
+            validateCallback?.Invoke(toOneRelationship, nextResourceType, path);
 
-            foreach (string publicName in publicNameParts[..^1])
-            {
-                RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceContext, path);
-
-                validateCallback?.Invoke(toOneRelationship, nextResourceContext, path);
-
-                chain.Add(toOneRelationship);
-                nextResourceContext = _resourceContextProvider.GetResourceContext(toOneRelationship.RightType);
-            }
-
-            string lastName = publicNameParts[^1];
-
-            RelationshipAttribute toManyRelationship = GetToManyRelationship(lastName, nextResourceContext, path);
-
-            validateCallback?.Invoke(toManyRelationship, nextResourceContext, path);
-
-            chain.Add(toManyRelationship);
-            return chain;
+            chainBuilder.Add(toOneRelationship);
+            nextResourceType = toOneRelationship.RightType;
         }
 
-        /// <summary>
-        /// Resolves a chain of to-one relationships that ends in either an attribute or a to-one relationship.
-        /// <example>
-        /// author.address.country.name
-        /// </example>
-        /// <example>
-        /// author.address
-        /// </example>
-        /// </summary>
-        public IReadOnlyCollection<ResourceFieldAttribute> ResolveToOneChainEndingInAttributeOrToOne(ResourceContext resourceContext, string path,
-            Action<ResourceFieldAttribute, ResourceContext, string> validateCallback = null)
+        string lastName = publicNameParts[^1];
+
+        RelationshipAttribute toManyRelationship = GetToManyRelationship(lastName, nextResourceType, path, inheritanceRequirement);
+
+        validateCallback?.Invoke(toManyRelationship, nextResourceType, path);
+
+        chainBuilder.Add(toManyRelationship);
+        return chainBuilder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Resolves a chain of to-one relationships that ends in either an attribute or a to-one relationship.
+    /// <example>
+    /// author.address.country.name
+    /// </example>
+    /// <example>
+    /// author.address
+    /// </example>
+    /// </summary>
+    public IImmutableList<ResourceFieldAttribute> ResolveToOneChainEndingInAttributeOrToOne(ResourceType resourceType, string path,
+        Action<ResourceFieldAttribute, ResourceType, string>? validateCallback = null)
+    {
+        ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder = ImmutableArray.CreateBuilder<ResourceFieldAttribute>();
+
+        string[] publicNameParts = path.Split(".");
+        ResourceType nextResourceType = resourceType;
+
+        foreach (string publicName in publicNameParts[..^1])
         {
-            var chain = new List<ResourceFieldAttribute>();
+            RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceType, path, FieldChainInheritanceRequirement.Disabled);
 
-            string[] publicNameParts = path.Split(".");
-            ResourceContext nextResourceContext = resourceContext;
+            validateCallback?.Invoke(toOneRelationship, nextResourceType, path);
 
-            foreach (string publicName in publicNameParts[..^1])
-            {
-                RelationshipAttribute toOneRelationship = GetToOneRelationship(publicName, nextResourceContext, path);
-
-                validateCallback?.Invoke(toOneRelationship, nextResourceContext, path);
-
-                chain.Add(toOneRelationship);
-                nextResourceContext = _resourceContextProvider.GetResourceContext(toOneRelationship.RightType);
-            }
-
-            string lastName = publicNameParts[^1];
-            ResourceFieldAttribute lastField = GetField(lastName, nextResourceContext, path);
-
-            if (lastField is HasManyAttribute)
-            {
-                throw new QueryParseException(path == lastName
-                    ? $"Field '{lastName}' must be an attribute or a to-one relationship on resource '{nextResourceContext.PublicName}'."
-                    : $"Field '{lastName}' in '{path}' must be an attribute or a to-one relationship on resource '{nextResourceContext.PublicName}'.");
-            }
-
-            validateCallback?.Invoke(lastField, nextResourceContext, path);
-
-            chain.Add(lastField);
-            return chain;
+            chainBuilder.Add(toOneRelationship);
+            nextResourceType = toOneRelationship.RightType;
         }
 
-        private RelationshipAttribute GetRelationship(string publicName, ResourceContext resourceContext, string path)
+        string lastName = publicNameParts[^1];
+        ResourceFieldAttribute lastField = GetField(lastName, nextResourceType, path);
+
+        if (lastField is HasManyAttribute)
         {
-            RelationshipAttribute relationship = resourceContext.Relationships.FirstOrDefault(nextRelationship => nextRelationship.PublicName == publicName);
+            string message = ErrorFormatter.GetForWrongFieldType(ResourceFieldCategory.Field, lastName, path, nextResourceType,
+                "an attribute or a to-one relationship");
 
-            if (relationship == null)
-            {
-                throw new QueryParseException(path == publicName
-                    ? $"Relationship '{publicName}' does not exist on resource '{resourceContext.PublicName}'."
-                    : $"Relationship '{publicName}' in '{path}' does not exist on resource '{resourceContext.PublicName}'.");
-            }
-
-            return relationship;
+            throw new QueryParseException(message);
         }
 
-        private RelationshipAttribute GetToManyRelationship(string publicName, ResourceContext resourceContext, string path)
+        validateCallback?.Invoke(lastField, nextResourceType, path);
+
+        chainBuilder.Add(lastField);
+        return chainBuilder.ToImmutable();
+    }
+
+    private RelationshipAttribute GetRelationship(string publicName, ResourceType resourceType, string path,
+        FieldChainInheritanceRequirement inheritanceRequirement)
+    {
+        IReadOnlyCollection<RelationshipAttribute> relationships = inheritanceRequirement == FieldChainInheritanceRequirement.Disabled
+            ? resourceType.FindRelationshipByPublicName(publicName)?.AsArray() ?? Array.Empty<RelationshipAttribute>()
+            : resourceType.GetRelationshipsInTypeOrDerived(publicName);
+
+        if (relationships.Count == 0)
         {
-            RelationshipAttribute relationship = GetRelationship(publicName, resourceContext, path);
-
-            if (!(relationship is HasManyAttribute))
-            {
-                throw new QueryParseException(path == publicName
-                    ? $"Relationship '{publicName}' must be a to-many relationship on resource '{resourceContext.PublicName}'."
-                    : $"Relationship '{publicName}' in '{path}' must be a to-many relationship on resource '{resourceContext.PublicName}'.");
-            }
-
-            return relationship;
+            string message = ErrorFormatter.GetForNotFound(ResourceFieldCategory.Relationship, publicName, path, resourceType, inheritanceRequirement);
+            throw new QueryParseException(message);
         }
 
-        private RelationshipAttribute GetToOneRelationship(string publicName, ResourceContext resourceContext, string path)
+        if (inheritanceRequirement == FieldChainInheritanceRequirement.RequireSingleMatch && relationships.Count > 1)
         {
-            RelationshipAttribute relationship = GetRelationship(publicName, resourceContext, path);
-
-            if (!(relationship is HasOneAttribute))
-            {
-                throw new QueryParseException(path == publicName
-                    ? $"Relationship '{publicName}' must be a to-one relationship on resource '{resourceContext.PublicName}'."
-                    : $"Relationship '{publicName}' in '{path}' must be a to-one relationship on resource '{resourceContext.PublicName}'.");
-            }
-
-            return relationship;
+            string message = ErrorFormatter.GetForMultipleMatches(ResourceFieldCategory.Relationship, publicName, path);
+            throw new QueryParseException(message);
         }
 
-        private AttrAttribute GetAttribute(string publicName, ResourceContext resourceContext, string path)
+        return relationships.First();
+    }
+
+    private RelationshipAttribute GetToManyRelationship(string publicName, ResourceType resourceType, string path,
+        FieldChainInheritanceRequirement inheritanceRequirement)
+    {
+        RelationshipAttribute relationship = GetRelationship(publicName, resourceType, path, inheritanceRequirement);
+
+        if (relationship is not HasManyAttribute)
         {
-            AttrAttribute attribute = resourceContext.Attributes.FirstOrDefault(nextAttribute => nextAttribute.PublicName == publicName);
-
-            if (attribute == null)
-            {
-                throw new QueryParseException(path == publicName
-                    ? $"Attribute '{publicName}' does not exist on resource '{resourceContext.PublicName}'."
-                    : $"Attribute '{publicName}' in '{path}' does not exist on resource '{resourceContext.PublicName}'.");
-            }
-
-            return attribute;
+            string message = ErrorFormatter.GetForWrongFieldType(ResourceFieldCategory.Relationship, publicName, path, resourceType, "a to-many relationship");
+            throw new QueryParseException(message);
         }
 
-        public ResourceFieldAttribute GetField(string publicName, ResourceContext resourceContext, string path)
+        return relationship;
+    }
+
+    private RelationshipAttribute GetToOneRelationship(string publicName, ResourceType resourceType, string path,
+        FieldChainInheritanceRequirement inheritanceRequirement)
+    {
+        RelationshipAttribute relationship = GetRelationship(publicName, resourceType, path, inheritanceRequirement);
+
+        if (relationship is not HasOneAttribute)
         {
-            ResourceFieldAttribute field = resourceContext.Fields.FirstOrDefault(nextField => nextField.PublicName == publicName);
-
-            if (field == null)
-            {
-                throw new QueryParseException(path == publicName
-                    ? $"Field '{publicName}' does not exist on resource '{resourceContext.PublicName}'."
-                    : $"Field '{publicName}' in '{path}' does not exist on resource '{resourceContext.PublicName}'.");
-            }
-
-            return field;
+            string message = ErrorFormatter.GetForWrongFieldType(ResourceFieldCategory.Relationship, publicName, path, resourceType, "a to-one relationship");
+            throw new QueryParseException(message);
         }
+
+        return relationship;
+    }
+
+    private AttrAttribute GetAttribute(string publicName, ResourceType resourceType, string path, FieldChainInheritanceRequirement inheritanceRequirement)
+    {
+        IReadOnlyCollection<AttrAttribute> attributes = inheritanceRequirement == FieldChainInheritanceRequirement.Disabled
+            ? resourceType.FindAttributeByPublicName(publicName)?.AsArray() ?? Array.Empty<AttrAttribute>()
+            : resourceType.GetAttributesInTypeOrDerived(publicName);
+
+        if (attributes.Count == 0)
+        {
+            string message = ErrorFormatter.GetForNotFound(ResourceFieldCategory.Attribute, publicName, path, resourceType, inheritanceRequirement);
+            throw new QueryParseException(message);
+        }
+
+        if (inheritanceRequirement == FieldChainInheritanceRequirement.RequireSingleMatch && attributes.Count > 1)
+        {
+            string message = ErrorFormatter.GetForMultipleMatches(ResourceFieldCategory.Attribute, publicName, path);
+            throw new QueryParseException(message);
+        }
+
+        return attributes.First();
+    }
+
+    public ResourceFieldAttribute GetField(string publicName, ResourceType resourceType, string path)
+    {
+        ResourceFieldAttribute? field = resourceType.Fields.FirstOrDefault(nextField => nextField.PublicName == publicName);
+
+        if (field == null)
+        {
+            string message = ErrorFormatter.GetForNotFound(ResourceFieldCategory.Field, publicName, path, resourceType,
+                FieldChainInheritanceRequirement.Disabled);
+
+            throw new QueryParseException(message);
+        }
+
+        return field;
     }
 }

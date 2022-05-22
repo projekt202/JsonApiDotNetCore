@@ -1,16 +1,16 @@
-using System;
+namespace JsonApiDotNetCore.Configuration;
 
-namespace JsonApiDotNetCore.Configuration
+internal sealed class ResourceDescriptor
 {
-    internal sealed class ResourceDescriptor
-    {
-        public Type ResourceType { get; }
-        public Type IdType { get; }
+    public Type ResourceClrType { get; }
+    public Type IdClrType { get; }
 
-        public ResourceDescriptor(Type resourceType, Type idType)
-        {
-            ResourceType = resourceType;
-            IdType = idType;
-        }
+    public ResourceDescriptor(Type resourceClrType, Type idClrType)
+    {
+        ArgumentGuard.NotNull(resourceClrType, nameof(resourceClrType));
+        ArgumentGuard.NotNull(idClrType, nameof(idClrType));
+
+        ResourceClrType = resourceClrType;
+        IdClrType = idClrType;
     }
 }

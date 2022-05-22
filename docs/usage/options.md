@@ -1,19 +1,13 @@
 # Global Options
 
-Configuration can be applied when adding the services to the dependency injection container.
+Configuration can be applied when adding services to the dependency injection container at startup.
 
 ```c#
-public class Startup
+// Program.cs
+builder.Services.AddJsonApi<AppDbContext>(options =>
 {
-    // This method gets called by the runtime. Use this method to add services to the container.
-    public void ConfigureServices(IServiceCollection services)
-    {
-        services.AddJsonApi<AppDbContext>(options =>
-        {
-            // configure the options here
-        });
-    }
-}
+    // Configure the options here...
+});
 ```
 
 ## Client Generated IDs
@@ -38,6 +32,9 @@ options.MaximumPageSize = new PageSize(100);
 options.MaximumPageNumber = new PageNumber(50);
 options.IncludeTotalResourceCount = true;
 ```
+
+To retrieve the total number of resources on secondary and relationship endpoints, the reverse of the relationship must to be available. For example, in `GET /customers/1/orders`, both the relationships `[HasMany] Customer.Orders` and `[HasOne] Order.Customer` must be defined.
+If `IncludeTotalResourceCount` is set to `false` (or the inverse relationship is unavailable on a non-primary endpoint), best-effort paging links are returned instead. This means no `last` link and the `next` link only occurs when the current page is full.
 
 ## Relative Links
 
@@ -78,43 +75,53 @@ To limit the maximum depth of nested includes, use `MaximumIncludeDepth`. This i
 options.MaximumIncludeDepth = 1;
 ```
 
-## Custom Serializer Settings
+## Customize Serializer options
 
-We use [Newtonsoft.Json](https://www.newtonsoft.com/json) for all serialization needs.
-If you want to change the default serializer settings, you can:
+We use [System.Text.Json](https://www.nuget.org/packages/System.Text.Json) for all serialization needs.
+If you want to change the default serializer options, you can:
 
 ```c#
-options.SerializerSettings.ReferenceLoopHandling = ReferenceLoopHandling.Ignore;
-options.SerializerSettings.Converters.Add(new StringEnumConverter());
-options.SerializerSettings.Formatting = Formatting.Indented;
+options.SerializerOptions.WriteIndented = true;
+options.SerializerOptions.ReferenceHandler = ReferenceHandler.Preserve;
+options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 ```
 
 The default naming convention (as used in the routes and resource/attribute/relationship names) is also determined here, and can be changed (default is camel-case):
 
 ```c#
-options.SerializerSettings.ContractResolver = new DefaultContractResolver
-{
-    NamingStrategy = new KebabCaseNamingStrategy()
-};
+// Use Pascal case
+options.SerializerOptions.PropertyNamingPolicy = null;
+options.SerializerOptions.DictionaryKeyPolicy = null;
 ```
 
-Because we copy resource properties into an intermediate object before serialization, Newtonsoft.Json annotations on properties are ignored.
+Because we copy resource properties into an intermediate object before serialization, JSON annotations such as `[JsonPropertyName]` and `[JsonIgnore]` on `[Attr]` properties are ignored.
 
 
-## Enable ModelState Validation
+## ModelState Validation
 
-If you would like to use ASP.NET Core ModelState validation into your controllers when creating / updating resources, set `ValidateModelState` to `true`. By default, no model validation is performed.
+[ASP.NET ModelState validation](https://docs.microsoft.com/en-us/aspnet/core/mvc/models/validation) can be used to validate incoming request bodies when creating and updating resources. Since v5.0, this is enabled by default.
+When `ValidateModelState` is set to `false`, no model validation is performed.
+
+How nullability affects ModelState validation is described [here](~/usage/resources/nullability.md).
 
 ```c#
 options.ValidateModelState = true;
 ```
 
 ```c#
-public class Person : Identifiable
+#nullable enable
+
+public class Person : Identifiable<int>
 {
     [Attr]
-    [Required]
     [MinLength(3)]
-    public string FirstName { get; set; }
+    public string FirstName { get; set; } = null!;
+
+    [Attr]
+    [Required]
+    public int? Age { get; set; }
+
+    [HasOne]
+    public LoginAccount Account { get; set; } = null!;
 }
 ```

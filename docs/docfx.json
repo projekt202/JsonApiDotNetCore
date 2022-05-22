@@ -3,15 +3,12 @@
         {
             "src": [
                 {
-                    "files": [ "**/JsonApiDotNetCore.csproj" ],
+                    "files": [ "**/JsonApiDotNetCore.csproj","**/JsonApiDotNetCore.Annotations.csproj" ],
                     "src": "../"
                 }
             ],
             "dest": "api",
-            "disableGitFeatures": false,
-            "properties": {
-                "targetFramework": "netcoreapp3.1"
-            }
+            "disableGitFeatures": false
         }
     ],
     "build": {
