@@ -1,15 +1,16 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>$(TargetFrameworkName)</TargetFramework>
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <AssemblyName>Projekt202.JsonApiDotNetCore</AssemblyName>
   </PropertyGroup>
 
   <PropertyGroup>
     <VersionPrefix>$(JsonApiDotNetCoreVersionPrefix)</VersionPrefix>
     <PackageTags>jsonapidotnetcore;jsonapi;json:api;dotnet;asp.net;rest;web-api</PackageTags>
     <Description>A framework for building JSON:API compliant REST APIs using ASP.NET and Entity Framework Core. Includes support for Atomic Operations. The ultimate goal of this library is to eliminate as much boilerplate as possible by offering out-of-the-box features such as sorting, filtering and pagination. You just need to focus on defining the resources and implementing your custom business logic. This library has been designed around dependency injection making extensibility incredibly easy.</Description>
-    <Authors>json-api-dotnet</Authors>
+    <Authors>json-api-dotnet, projekt202</Authors>
     <PackageProjectUrl>https://www.jsonapi.net/</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
@@ -18,6 +19,11 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <DebugType>embedded</DebugType>
+    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

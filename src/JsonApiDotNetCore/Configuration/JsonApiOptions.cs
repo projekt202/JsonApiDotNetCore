@@ -102,6 +102,13 @@ public sealed class JsonApiOptions : IJsonApiOptions
         }
     };
 
+
+    /// <inheritdoc />
+    public bool EnableDefaultSortById { get; set; } = true;
+
+    /// <inheritdoc />
+    public bool AlwaysReturnResourceOnCreateUpdate { get; set; } = false;
+
     static JsonApiOptions()
     {
         // Bug workaround for https://github.com/dotnet/efcore/issues/27436

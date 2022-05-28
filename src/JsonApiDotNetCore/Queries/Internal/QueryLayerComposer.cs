@@ -501,7 +501,7 @@ public class QueryLayerComposer : IQueryLayerComposer
 
         sort = _resourceDefinitionAccessor.OnApplySort(resourceType, sort);
 
-        if (sort == null)
+        if (sort == null && _options.EnableDefaultSortById)
         {
             AttrAttribute idAttribute = GetIdAttribute(resourceType);
             var idAscendingSort = new SortElementExpression(new ResourceFieldChainExpression(idAttribute), true);

@@ -165,4 +165,17 @@ public interface IJsonApiOptions
     /// Gets the settings used for serializing response bodies. This value is based on <see cref="SerializerOptions" /> and is intended for internal use.
     /// </summary>
     JsonSerializerOptions SerializerWriteOptions { get; }
+
+    /// <summary>
+    /// If true, will automatically sort resources by Id, if no other sort was specified. Default is true.
+    /// </summary>
+    bool EnableDefaultSortById { get; set; }
+
+    /// <summary>
+    /// If true, will return the serialized updated resource on POST 201 Created and PATCH 200 OK. Otherwise, the serialized resource is only returned
+    /// if any field is changed on the server that was not included in the original request. Default is false
+    /// <see href="https://jsonapi.org/format/#crud-updating-responses-200">https://jsonapi.org/format/#crud-updating-responses-200</see>
+    /// <see href="https://jsonapi.org/format/#crud-creating-responses-204">https://jsonapi.org/format/#crud-creating-responses-204</see>
+    /// </summary>
+    bool AlwaysReturnResourceOnCreateUpdate { get; set; }
 }

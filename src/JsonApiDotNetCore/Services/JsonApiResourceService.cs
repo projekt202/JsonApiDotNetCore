@@ -228,7 +228,7 @@ public class JsonApiResourceService<TResource, TId> : IResourceService<TResource
         _resourceChangeTracker.SetFinallyStoredAttributeValues(resourceFromDatabase);
 
         bool hasImplicitChanges = _resourceChangeTracker.HasImplicitChanges();
-        return hasImplicitChanges ? resourceFromDatabase : null;
+        return (hasImplicitChanges || _options.AlwaysReturnResourceOnCreateUpdate) ? resourceFromDatabase : null;
     }
 
     protected async Task AssertPrimaryResourceDoesNotExistAsync(TResource resource, CancellationToken cancellationToken)
@@ -477,7 +477,7 @@ public class JsonApiResourceService<TResource, TId> : IResourceService<TResource
         _resourceChangeTracker.SetFinallyStoredAttributeValues(afterResourceFromDatabase);
 
         bool hasImplicitChanges = _resourceChangeTracker.HasImplicitChanges();
-        return hasImplicitChanges ? afterResourceFromDatabase : null;
+        return (hasImplicitChanges || _options.AlwaysReturnResourceOnCreateUpdate) ? afterResourceFromDatabase : null;
     }
 
     /// <inheritdoc />
