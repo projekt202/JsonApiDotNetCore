@@ -1,165 +1,93 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
 using JsonApiDotNetCore.Resources.Annotations;
 
-namespace JsonApiDotNetCore.Queries.Expressions
+namespace JsonApiDotNetCore.Queries.Expressions;
+
+/// <summary>
+/// Converts includes between tree and chain formats. Exists for backwards compatibility, subject to be removed in the future.
+/// </summary>
+internal sealed class IncludeChainConverter
 {
     /// <summary>
-    /// Converts includes between tree and chain formats. Exists for backwards compatibility, subject to be removed in the future.
+    /// Converts a tree of inclusions into a set of relationship chains.
     /// </summary>
-    internal sealed class IncludeChainConverter
+    /// <example>
+    /// Input tree: <code><![CDATA[
+    /// Article
+    /// {
+    ///   Blog,
+    ///   Revisions
+    ///   {
+    ///     Author
+    ///   }
+    /// }
+    /// ]]></code> Output chains:
+    /// <code><![CDATA[
+    /// Article -> Blog,
+    /// Article -> Revisions -> Author
+    /// ]]></code>
+    /// </example>
+    public IReadOnlyCollection<ResourceFieldChainExpression> GetRelationshipChains(IncludeExpression include)
     {
-        /// <summary>
-        /// Converts a tree of inclusions into a set of relationship chains.
-        /// </summary>
-        /// <example>
-        /// Input tree: <code><![CDATA[
-        /// Article
-        /// {
-        ///   Blog,
-        ///   Revisions
-        ///   {
-        ///     Author
-        ///   }
-        /// }
-        /// ]]></code> Output chains:
-        /// <code><![CDATA[
-        /// Article -> Blog,
-        /// Article -> Revisions -> Author
-        /// ]]></code>
-        /// </example>
-        public IReadOnlyCollection<ResourceFieldChainExpression> GetRelationshipChains(IncludeExpression include)
-        {
-            ArgumentGuard.NotNull(include, nameof(include));
+        ArgumentGuard.NotNull(include, nameof(include));
 
-            if (!include.Elements.Any())
+        if (!include.Elements.Any())
+        {
+            return Array.Empty<ResourceFieldChainExpression>();
+        }
+
+        var converter = new IncludeToChainsConverter();
+        converter.Visit(include, null);
+
+        return converter.Chains;
+    }
+
+    private sealed class IncludeToChainsConverter : QueryExpressionVisitor<object?, object?>
+    {
+        private readonly Stack<RelationshipAttribute> _parentRelationshipStack = new();
+
+        public List<ResourceFieldChainExpression> Chains { get; } = new();
+
+        public override object? VisitInclude(IncludeExpression expression, object? argument)
+        {
+            foreach (IncludeElementExpression element in expression.Elements)
             {
-                return Array.Empty<ResourceFieldChainExpression>();
+                Visit(element, null);
             }
 
-            var converter = new IncludeToChainsConverter();
-            converter.Visit(include, null);
-
-            return converter.Chains;
+            return null;
         }
 
-        /// <summary>
-        /// Converts a set of relationship chains into a tree of inclusions.
-        /// </summary>
-        /// <example>
-        /// Input chains: <code><![CDATA[
-        /// Article -> Blog,
-        /// Article -> Revisions -> Author
-        /// ]]></code> Output tree:
-        /// <code><![CDATA[
-        /// Article
-        /// {
-        ///   Blog,
-        ///   Revisions
-        ///   {
-        ///     Author
-        ///   }
-        /// }
-        /// ]]></code>
-        /// </example>
-        public IncludeExpression FromRelationshipChains(IReadOnlyCollection<ResourceFieldChainExpression> chains)
+        public override object? VisitIncludeElement(IncludeElementExpression expression, object? argument)
         {
-            ArgumentGuard.NotNull(chains, nameof(chains));
-
-            IReadOnlyCollection<IncludeElementExpression> elements = ConvertChainsToElements(chains);
-            return elements.Any() ? new IncludeExpression(elements) : IncludeExpression.Empty;
-        }
-
-        private static IReadOnlyCollection<IncludeElementExpression> ConvertChainsToElements(IReadOnlyCollection<ResourceFieldChainExpression> chains)
-        {
-            var rootNode = new MutableIncludeNode(null);
-
-            foreach (ResourceFieldChainExpression chain in chains)
+            if (!expression.Children.Any())
             {
-                ConvertChainToElement(chain, rootNode);
+                FlushChain(expression);
             }
-
-            return rootNode.Children.Values.Select(child => child.ToExpression()).ToArray();
-        }
-
-        private static void ConvertChainToElement(ResourceFieldChainExpression chain, MutableIncludeNode rootNode)
-        {
-            MutableIncludeNode currentNode = rootNode;
-
-            foreach (RelationshipAttribute relationship in chain.Fields.OfType<RelationshipAttribute>())
+            else
             {
-                if (!currentNode.Children.ContainsKey(relationship))
+                _parentRelationshipStack.Push(expression.Relationship);
+
+                foreach (IncludeElementExpression child in expression.Children)
                 {
-                    currentNode.Children[relationship] = new MutableIncludeNode(relationship);
+                    Visit(child, null);
                 }
 
-                currentNode = currentNode.Children[relationship];
+                _parentRelationshipStack.Pop();
             }
+
+            return null;
         }
 
-        private sealed class IncludeToChainsConverter : QueryExpressionVisitor<object, object>
+        private void FlushChain(IncludeElementExpression expression)
         {
-            private readonly Stack<RelationshipAttribute> _parentRelationshipStack = new Stack<RelationshipAttribute>();
+            ImmutableArray<ResourceFieldAttribute>.Builder chainBuilder =
+                ImmutableArray.CreateBuilder<ResourceFieldAttribute>(_parentRelationshipStack.Count + 1);
 
-            public List<ResourceFieldChainExpression> Chains { get; } = new List<ResourceFieldChainExpression>();
+            chainBuilder.AddRange(_parentRelationshipStack.Reverse());
+            chainBuilder.Add(expression.Relationship);
 
-            public override object VisitInclude(IncludeExpression expression, object argument)
-            {
-                foreach (IncludeElementExpression element in expression.Elements)
-                {
-                    Visit(element, null);
-                }
-
-                return null;
-            }
-
-            public override object VisitIncludeElement(IncludeElementExpression expression, object argument)
-            {
-                if (!expression.Children.Any())
-                {
-                    FlushChain(expression);
-                }
-                else
-                {
-                    _parentRelationshipStack.Push(expression.Relationship);
-
-                    foreach (IncludeElementExpression child in expression.Children)
-                    {
-                        Visit(child, null);
-                    }
-
-                    _parentRelationshipStack.Pop();
-                }
-
-                return null;
-            }
-
-            private void FlushChain(IncludeElementExpression expression)
-            {
-                List<RelationshipAttribute> fieldsInChain = _parentRelationshipStack.Reverse().ToList();
-                fieldsInChain.Add(expression.Relationship);
-
-                Chains.Add(new ResourceFieldChainExpression(fieldsInChain));
-            }
-        }
-
-        private sealed class MutableIncludeNode
-        {
-            private readonly RelationshipAttribute _relationship;
-
-            public IDictionary<RelationshipAttribute, MutableIncludeNode> Children { get; } = new Dictionary<RelationshipAttribute, MutableIncludeNode>();
-
-            public MutableIncludeNode(RelationshipAttribute relationship)
-            {
-                _relationship = relationship;
-            }
-
-            public IncludeElementExpression ToExpression()
-            {
-                IncludeElementExpression[] elementChildren = Children.Values.Select(child => child.ToExpression()).ToArray();
-                return new IncludeElementExpression(_relationship, elementChildren);
-            }
+            Chains.Add(new ResourceFieldChainExpression(chainBuilder.ToImmutable()));
         }
     }
 }

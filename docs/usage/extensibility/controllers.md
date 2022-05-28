@@ -1,112 +1,132 @@
 # Controllers
 
-You need to create controllers that inherit from `JsonApiController<TResource>`
+To expose API endpoints, ASP.NET controllers need to be defined.
+
+_since v5_
+
+Controllers are auto-generated (using [source generators](https://docs.microsoft.com/en-us/dotnet/csharp/roslyn-sdk/source-generators-overview)) when you add `[Resource]` on your model class:
 
 ```c#
-public class ArticlesController : JsonApiController<Article>
+[Resource] // Generates ArticlesController.g.cs
+public class Article : Identifiable<Guid>
 {
-    public ArticlesController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IResourceService<Article> resourceService)
-        : base(options, loggerFactory, resourceService)
-    {
-    }
-}
-```
-
-## Non-Integer Type Keys
-
-If your model is using a type other than `int` for the primary key, you must explicitly declare it in the controller/service/repository definitions.
-
-```c#
-public class ArticlesController : JsonApiController<Article, Guid>
-//---------------------------------------------------------- ^^^^
-{
-    public ArticlesController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IResourceService<Article, Guid> resourceService)
-        //----------------------- ^^^^
-        : base(options, loggerFactory, resourceService)
-    {
-    }
+    // ...
 }
 ```
 
 ## Resource Access Control
 
-It is often desirable to limit what methods are exposed on your controller. The first way you can do this, is to simply inherit from `BaseJsonApiController` and explicitly declare what methods are available.
-
-In this example, if a client attempts to do anything other than GET a resource, an HTTP 404 Not Found response will be returned since no other methods are exposed.
-
-This approach is ok, but introduces some boilerplate that can easily be avoided.
+It is often desirable to limit which endpoints are exposed on your controller.
+A subset can be specified too:
 
 ```c#
-public class ArticlesController : BaseJsonApiController<Article>
+[Resource(GenerateControllerEndpoints =
+    JsonApiEndpoints.GetCollection | JsonApiEndpoints.GetSingle)]
+public class Article : Identifiable<Guid>
 {
-    public ArticlesController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IResourceService<Article> resourceService)
-        : base(options, loggerFactory, resourceService)
-    {
-    }
+    // ...
+}
+```
 
-    [HttpGet]
-    public override async Task<IActionResult> GetAsync(CancellationToken cancellationToken)
-    {
-        return await base.GetAsync(cancellationToken);
-    }
+Instead of passing a set of endpoints, you can use `JsonApiEndpoints.Query` to generate all read-only endpoints or `JsonApiEndpoints.Command` for all write-only endpoints.
 
-    [HttpGet("{id}")]
-    public override async Task<IActionResult> GetAsync(int id,
-        CancellationToken cancellationToken)
+When an endpoint is blocked, an HTTP 403 Forbidden response is returned.
+
+```http
+DELETE http://localhost:14140/articles/1 HTTP/1.1
+```
+
+```json
+{
+  "links": {
+    "self": "/articles"
+  },
+  "errors": [
     {
-        return await base.GetAsync(id, cancellationToken);
+      "id": "dde7f219-2274-4473-97ef-baac3e7c1487",
+      "status": "403",
+      "title": "The requested endpoint is not accessible.",
+      "detail": "Endpoint '/articles/1' is not accessible for DELETE requests."
+    }
+  ]
+}
+```
+
+## Augmenting controllers
+
+Auto-generated controllers can easily be augmented because they are partial classes. For example:
+
+```c#
+[DisableRoutingConvention]
+[Route("some/custom/route")]
+[DisableQueryString(JsonApiQueryStringParameters.Include)]
+partial class ArticlesController
+{
+    [HttpPost]
+    public IActionResult Upload()
+    {
+        // ...
     }
 }
 ```
 
-## Using ActionFilterAttributes
-
-The next option is to use the ActionFilter attributes that ship with the library. The available attributes are:
-
-- `NoHttpPost`: disallow POST requests
-- `NoHttpPatch`: disallow PATCH requests
-- `NoHttpDelete`: disallow DELETE requests
-- `HttpReadOnly`: all of the above
-
-Not only does this reduce boilerplate, but it also provides a more meaningful HTTP response code.
-An attempt to use one of the blacklisted methods will result in a HTTP 405 Method Not Allowed response.
+If you need to inject extra dependencies, tell the IoC container with `[ActivatorUtilitiesConstructor]` to prefer your constructor:
 
 ```c#
-[HttpReadOnly]
-public class ArticlesController : BaseJsonApiController<Article>
+partial class ArticlesController
 {
-    public ArticlesController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IResourceService<Article> resourceService)
-        : base(options, loggerFactory, resourceService)
+    private IAuthenticationService _authService;
+
+    [ActivatorUtilitiesConstructor]
+    public ArticlesController(IAuthenticationService authService, IJsonApiOptions options,
+        IResourceGraph resourceGraph, ILoggerFactory loggerFactory,
+        IResourceService<Article, Guid> resourceService)
+            : base(options, resourceGraph, loggerFactory, resourceService)
+    {
+        _authService = authService;
+    }
+}
+```
+
+In case you don't want to use auto-generated controllers and define them yourself (see below), remove
+`[Resource]` from your models or use `[Resource(GenerateControllerEndpoints = JsonApiEndpoints.None)]`.
+
+## Earlier versions
+
+In earlier versions of JsonApiDotNetCore, you needed to create controllers that inherit from `JsonApiController<TResource, TId>`. For example:
+
+```c#
+public class ArticlesController : JsonApiController<Article, Guid>
+{
+    public ArticlesController(IJsonApiOptions options, IResourceGraph resourceGraph,
+        ILoggerFactory loggerFactory, IResourceService<Article, Guid> resourceService)
+        : base(options, resourceGraph, loggerFactory, resourceService)
     {
     }
 }
 ```
 
-## Implicit Access By Service Injection
+If you want to setup routes yourself, you can instead inherit from `BaseJsonApiController<TResource, TId>` and override its methods with your own `[HttpGet]`, `[HttpHead]`, `[HttpPost]`, `[HttpPatch]` and `[HttpDelete]` attributes added on them. Don't forget to add `[FromBody]` on parameters where needed.
 
-Finally, you can control the allowed methods by supplying only the available service implementations. In some cases, resources may be an aggregation of entities or a view on top of the underlying entities. In these cases, there may not be a writable IResourceService implementation, so simply inject the implementation that is available.
+### Resource Access Control
 
-As with the ActionFilter attributes, if a service implementation is not available to service a request, HTTP 405 Method Not Allowed will be returned.
+It is often desirable to limit which routes are exposed on your controller.
 
-For more information about resource injection, see the next section titled Resource Services.
+To provide read-only access, inherit from `JsonApiQueryController` instead, which blocks all POST, PATCH and DELETE requests.
+Likewise, to provide write-only access, inherit from `JsonApiCommandController`, which blocks all GET and HEAD requests.
+
+You can even make your own mix of allowed routes by calling the alternate constructor of `JsonApiController` and injecting the set of service implementations available.
+In some cases, resources may be an aggregation of entities or a view on top of the underlying entities. In these cases, there may not be a writable `IResourceService` implementation, so simply inject the implementation that is available.
 
 ```c#
-public class ReportsController : BaseJsonApiController<Report>
+public class ReportsController : JsonApiController<Report, int>
 {
-    public ReportsController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IResourceService<Report> resourceService)
-        : base(options, loggerFactory, resourceService)
+    public ReportsController(IJsonApiOptions options, IResourceGraph resourceGraph,
+        ILoggerFactory loggerFactory, IGetAllService<Report, int> getAllService)
+        : base(options, resourceGraph, loggerFactory, getAll: getAllService)
     {
-    }
-
-    [HttpGet]
-    public override async Task<IActionResult> GetAsync(CancellationToken cancellationToken)
-    {
-        return await base.GetAsync(cancellationToken);
     }
 }
 ```
+
+For more information about resource service injection, see [Replacing injected services](~/usage/extensibility/layer-overview.md#replacing-injected-services) and [Resource Services](~/usage/extensibility/services.md).

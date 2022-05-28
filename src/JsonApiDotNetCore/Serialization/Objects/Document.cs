@@ -1,35 +1,41 @@
-using System.Collections.Generic;
-using Newtonsoft.Json;
+using System.Text.Json.Serialization;
 
-namespace JsonApiDotNetCore.Serialization.Objects
+namespace JsonApiDotNetCore.Serialization.Objects;
+
+/// <summary>
+/// See https://jsonapi.org/format/1.1/#document-top-level and https://jsonapi.org/ext/atomic/#document-structure.
+/// </summary>
+public sealed class Document
 {
-    /// <summary>
-    /// https://jsonapi.org/format/#document-structure
-    /// </summary>
-    public sealed class Document : ExposableData<ResourceObject>
-    {
-        /// <summary>
-        /// see "meta" in https://jsonapi.org/format/#document-top-level
-        /// </summary>
-        [JsonProperty("meta", NullValueHandling = NullValueHandling.Ignore)]
-        public IDictionary<string, object> Meta { get; set; }
+    [JsonPropertyName("jsonapi")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonApiObject? JsonApi { get; set; }
 
-        /// <summary>
-        /// see "jsonapi" in https://jsonapi.org/format/#document-top-level
-        /// </summary>
-        [JsonProperty("jsonapi", NullValueHandling = NullValueHandling.Ignore)]
-        public JsonApiObject JsonApi { get; set; }
+    [JsonPropertyName("links")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TopLevelLinks? Links { get; set; }
 
-        /// <summary>
-        /// see "links" in https://jsonapi.org/format/#document-top-level
-        /// </summary>
-        [JsonProperty("links", NullValueHandling = NullValueHandling.Ignore)]
-        public TopLevelLinks Links { get; set; }
+    [JsonPropertyName("data")]
+    // JsonIgnoreCondition is determined at runtime by WriteOnlyDocumentConverter.
+    public SingleOrManyData<ResourceObject> Data { get; set; }
 
-        /// <summary>
-        /// see "included" in https://jsonapi.org/format/#document-top-level
-        /// </summary>
-        [JsonProperty("included", NullValueHandling = NullValueHandling.Ignore, Order = 1)]
-        public IList<ResourceObject> Included { get; set; }
-    }
+    [JsonPropertyName("atomic:operations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<AtomicOperationObject?>? Operations { get; set; }
+
+    [JsonPropertyName("atomic:results")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<AtomicResultObject>? Results { get; set; }
+
+    [JsonPropertyName("errors")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<ErrorObject>? Errors { get; set; }
+
+    [JsonPropertyName("included")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<ResourceObject>? Included { get; set; }
+
+    [JsonPropertyName("meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, object?>? Meta { get; set; }
 }

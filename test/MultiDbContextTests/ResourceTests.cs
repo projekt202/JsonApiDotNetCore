@@ -1,59 +1,68 @@
 using System.Net;
-using System.Net.Http;
-using System.Threading.Tasks;
+using System.Text.Json;
 using FluentAssertions;
+using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Serialization.Objects;
 using Microsoft.AspNetCore.Mvc.Testing;
-using MultiDbContextExample;
+using Microsoft.Extensions.DependencyInjection;
+using MultiDbContextExample.Models;
 using TestBuildingBlocks;
 using Xunit;
 
-namespace MultiDbContextTests
+namespace MultiDbContextTests;
+
+public sealed class ResourceTests : IntegrationTest, IClassFixture<WebApplicationFactory<ResourceA>>
 {
-    public sealed class ResourceTests : IntegrationTest, IClassFixture<WebApplicationFactory<Startup>>
+    private readonly WebApplicationFactory<ResourceA> _factory;
+
+    protected override JsonSerializerOptions SerializerOptions
     {
-        private readonly WebApplicationFactory<Startup> _factory;
-
-        public ResourceTests(WebApplicationFactory<Startup> factory)
+        get
         {
-            _factory = factory;
+            var options = _factory.Services.GetRequiredService<IJsonApiOptions>();
+            return options.SerializerOptions;
         }
+    }
 
-        [Fact]
-        public async Task Can_get_ResourceAs()
-        {
-            // Arrange
-            const string route = "/resourceAs";
+    public ResourceTests(WebApplicationFactory<ResourceA> factory)
+    {
+        _factory = factory;
+    }
 
-            // Act
-            (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
+    [Fact]
+    public async Task Can_get_ResourceAs()
+    {
+        // Arrange
+        const string route = "/resourceAs";
 
-            // Assert
-            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+        // Act
+        (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
 
-            responseDocument.ManyData.Should().HaveCount(1);
-            responseDocument.ManyData[0].Attributes["nameA"].Should().Be("SampleA");
-        }
+        // Assert
+        httpResponse.ShouldHaveStatusCode(HttpStatusCode.OK);
 
-        [Fact]
-        public async Task Can_get_ResourceBs()
-        {
-            // Arrange
-            const string route = "/resourceBs";
+        responseDocument.Data.ManyValue.ShouldHaveCount(1);
+        responseDocument.Data.ManyValue[0].Attributes.ShouldContainKey("nameA").With(value => value.Should().Be("SampleA"));
+    }
 
-            // Act
-            (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
+    [Fact]
+    public async Task Can_get_ResourceBs()
+    {
+        // Arrange
+        const string route = "/resourceBs";
 
-            // Assert
-            httpResponse.Should().HaveStatusCode(HttpStatusCode.OK);
+        // Act
+        (HttpResponseMessage httpResponse, Document responseDocument) = await ExecuteGetAsync<Document>(route);
 
-            responseDocument.ManyData.Should().HaveCount(1);
-            responseDocument.ManyData[0].Attributes["nameB"].Should().Be("SampleB");
-        }
+        // Assert
+        httpResponse.ShouldHaveStatusCode(HttpStatusCode.OK);
 
-        protected override HttpClient CreateClient()
-        {
-            return _factory.CreateClient();
-        }
+        responseDocument.Data.ManyValue.ShouldHaveCount(1);
+        responseDocument.Data.ManyValue[0].Attributes.ShouldContainKey("nameB").With(value => value.Should().Be("SampleB"));
+    }
+
+    protected override HttpClient CreateClient()
+    {
+        return _factory.CreateClient();
     }
 }

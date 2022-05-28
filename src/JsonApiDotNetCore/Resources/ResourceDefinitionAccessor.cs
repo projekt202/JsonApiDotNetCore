@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Collections.Immutable;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Middleware;
@@ -9,205 +6,207 @@ using JsonApiDotNetCore.Queries.Expressions;
 using JsonApiDotNetCore.Resources.Annotations;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace JsonApiDotNetCore.Resources
+namespace JsonApiDotNetCore.Resources;
+
+/// <inheritdoc />
+[PublicAPI]
+public class ResourceDefinitionAccessor : IResourceDefinitionAccessor
 {
-    /// <inheritdoc />
-    [PublicAPI]
-    public class ResourceDefinitionAccessor : IResourceDefinitionAccessor
+    private readonly IResourceGraph _resourceGraph;
+    private readonly IServiceProvider _serviceProvider;
+
+    public ResourceDefinitionAccessor(IResourceGraph resourceGraph, IServiceProvider serviceProvider)
     {
-        private readonly IResourceContextProvider _resourceContextProvider;
-        private readonly IServiceProvider _serviceProvider;
+        ArgumentGuard.NotNull(resourceGraph, nameof(resourceGraph));
+        ArgumentGuard.NotNull(serviceProvider, nameof(serviceProvider));
 
-        public ResourceDefinitionAccessor(IResourceContextProvider resourceContextProvider, IServiceProvider serviceProvider)
+        _resourceGraph = resourceGraph;
+        _serviceProvider = serviceProvider;
+    }
+
+    /// <inheritdoc />
+    public IImmutableSet<IncludeElementExpression> OnApplyIncludes(ResourceType resourceType, IImmutableSet<IncludeElementExpression> existingIncludes)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
+        return resourceDefinition.OnApplyIncludes(existingIncludes);
+    }
+
+    /// <inheritdoc />
+    public FilterExpression? OnApplyFilter(ResourceType resourceType, FilterExpression? existingFilter)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
+        return resourceDefinition.OnApplyFilter(existingFilter);
+    }
+
+    /// <inheritdoc />
+    public SortExpression? OnApplySort(ResourceType resourceType, SortExpression? existingSort)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
+        return resourceDefinition.OnApplySort(existingSort);
+    }
+
+    /// <inheritdoc />
+    public PaginationExpression? OnApplyPagination(ResourceType resourceType, PaginationExpression? existingPagination)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
+        return resourceDefinition.OnApplyPagination(existingPagination);
+    }
+
+    /// <inheritdoc />
+    public SparseFieldSetExpression? OnApplySparseFieldSet(ResourceType resourceType, SparseFieldSetExpression? existingSparseFieldSet)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
+        return resourceDefinition.OnApplySparseFieldSet(existingSparseFieldSet);
+    }
+
+    /// <inheritdoc />
+    public object? GetQueryableHandlerForQueryStringParameter(Type resourceClrType, string parameterName)
+    {
+        ArgumentGuard.NotNull(resourceClrType, nameof(resourceClrType));
+        ArgumentGuard.NotNullNorEmpty(parameterName, nameof(parameterName));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceClrType);
+        dynamic handlers = resourceDefinition.OnRegisterQueryableHandlersForQueryStringParameters();
+
+        if (handlers != null)
         {
-            ArgumentGuard.NotNull(resourceContextProvider, nameof(resourceContextProvider));
-            ArgumentGuard.NotNull(serviceProvider, nameof(serviceProvider));
-
-            _resourceContextProvider = resourceContextProvider;
-            _serviceProvider = serviceProvider;
-        }
-
-        /// <inheritdoc />
-        public IReadOnlyCollection<IncludeElementExpression> OnApplyIncludes(Type resourceType, IReadOnlyCollection<IncludeElementExpression> existingIncludes)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            return resourceDefinition.OnApplyIncludes(existingIncludes);
-        }
-
-        /// <inheritdoc />
-        public FilterExpression OnApplyFilter(Type resourceType, FilterExpression existingFilter)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            return resourceDefinition.OnApplyFilter(existingFilter);
-        }
-
-        /// <inheritdoc />
-        public SortExpression OnApplySort(Type resourceType, SortExpression existingSort)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            return resourceDefinition.OnApplySort(existingSort);
-        }
-
-        /// <inheritdoc />
-        public PaginationExpression OnApplyPagination(Type resourceType, PaginationExpression existingPagination)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            return resourceDefinition.OnApplyPagination(existingPagination);
-        }
-
-        /// <inheritdoc />
-        public SparseFieldSetExpression OnApplySparseFieldSet(Type resourceType, SparseFieldSetExpression existingSparseFieldSet)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            return resourceDefinition.OnApplySparseFieldSet(existingSparseFieldSet);
-        }
-
-        /// <inheritdoc />
-        public object GetQueryableHandlerForQueryStringParameter(Type resourceType, string parameterName)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-            ArgumentGuard.NotNullNorEmpty(parameterName, nameof(parameterName));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            dynamic handlers = resourceDefinition.OnRegisterQueryableHandlersForQueryStringParameters();
-
-            return handlers != null && handlers.ContainsKey(parameterName) ? handlers[parameterName] : null;
-        }
-
-        /// <inheritdoc />
-        public IDictionary<string, object> GetMeta(Type resourceType, IIdentifiable resourceInstance)
-        {
-            ArgumentGuard.NotNull(resourceType, nameof(resourceType));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
-            return resourceDefinition.GetMeta((dynamic)resourceInstance);
-        }
-
-        /// <inheritdoc />
-        public async Task OnPrepareWriteAsync<TResource>(TResource resource, OperationKind operationKind, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            await resourceDefinition.OnPrepareWriteAsync(resource, operationKind, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public async Task<IIdentifiable> OnSetToOneRelationshipAsync<TResource>(TResource leftResource, HasOneAttribute hasOneRelationship,
-            IIdentifiable rightResourceId, OperationKind operationKind, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable
-        {
-            ArgumentGuard.NotNull(leftResource, nameof(leftResource));
-            ArgumentGuard.NotNull(hasOneRelationship, nameof(hasOneRelationship));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            return await resourceDefinition.OnSetToOneRelationshipAsync(leftResource, hasOneRelationship, rightResourceId, operationKind, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public async Task OnSetToManyRelationshipAsync<TResource>(TResource leftResource, HasManyAttribute hasManyRelationship,
-            ISet<IIdentifiable> rightResourceIds, OperationKind operationKind, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable
-        {
-            ArgumentGuard.NotNull(leftResource, nameof(leftResource));
-            ArgumentGuard.NotNull(hasManyRelationship, nameof(hasManyRelationship));
-            ArgumentGuard.NotNull(rightResourceIds, nameof(rightResourceIds));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            await resourceDefinition.OnSetToManyRelationshipAsync(leftResource, hasManyRelationship, rightResourceIds, operationKind, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public async Task OnAddToRelationshipAsync<TResource, TId>(TId leftResourceId, HasManyAttribute hasManyRelationship,
-            ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable<TId>
-        {
-            ArgumentGuard.NotNull(hasManyRelationship, nameof(hasManyRelationship));
-            ArgumentGuard.NotNull(rightResourceIds, nameof(rightResourceIds));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            await resourceDefinition.OnAddToRelationshipAsync(leftResourceId, hasManyRelationship, rightResourceIds, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public async Task OnRemoveFromRelationshipAsync<TResource>(TResource leftResource, HasManyAttribute hasManyRelationship,
-            ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable
-        {
-            ArgumentGuard.NotNull(leftResource, nameof(leftResource));
-            ArgumentGuard.NotNull(hasManyRelationship, nameof(hasManyRelationship));
-            ArgumentGuard.NotNull(rightResourceIds, nameof(rightResourceIds));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            await resourceDefinition.OnRemoveFromRelationshipAsync(leftResource, hasManyRelationship, rightResourceIds, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public async Task OnWritingAsync<TResource>(TResource resource, OperationKind operationKind, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            await resourceDefinition.OnWritingAsync(resource, operationKind, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public async Task OnWriteSucceededAsync<TResource>(TResource resource, OperationKind operationKind, CancellationToken cancellationToken)
-            where TResource : class, IIdentifiable
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(typeof(TResource));
-            await resourceDefinition.OnWriteSucceededAsync(resource, operationKind, cancellationToken);
-        }
-
-        /// <inheritdoc />
-        public void OnDeserialize(IIdentifiable resource)
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resource.GetType());
-            resourceDefinition.OnDeserialize((dynamic)resource);
-        }
-
-        /// <inheritdoc />
-        public void OnSerialize(IIdentifiable resource)
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            dynamic resourceDefinition = ResolveResourceDefinition(resource.GetType());
-            resourceDefinition.OnSerialize((dynamic)resource);
-        }
-
-        protected virtual object ResolveResourceDefinition(Type resourceType)
-        {
-            ResourceContext resourceContext = _resourceContextProvider.GetResourceContext(resourceType);
-
-            if (resourceContext.IdentityType == typeof(int))
+            if (handlers.ContainsKey(parameterName))
             {
-                Type intResourceDefinitionType = typeof(IResourceDefinition<>).MakeGenericType(resourceContext.ResourceType);
-                object intResourceDefinition = _serviceProvider.GetService(intResourceDefinitionType);
-
-                if (intResourceDefinition != null)
-                {
-                    return intResourceDefinition;
-                }
+                return handlers[parameterName];
             }
-
-            Type resourceDefinitionType = typeof(IResourceDefinition<,>).MakeGenericType(resourceContext.ResourceType, resourceContext.IdentityType);
-            return _serviceProvider.GetRequiredService(resourceDefinitionType);
         }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public IDictionary<string, object?>? GetMeta(ResourceType resourceType, IIdentifiable resourceInstance)
+    {
+        ArgumentGuard.NotNull(resourceType, nameof(resourceType));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resourceType);
+        return resourceDefinition.GetMeta((dynamic)resourceInstance);
+    }
+
+    /// <inheritdoc />
+    public async Task OnPrepareWriteAsync<TResource>(TResource resource, WriteOperationKind writeOperation, CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resource.GetClrType());
+        await resourceDefinition.OnPrepareWriteAsync((dynamic)resource, writeOperation, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IIdentifiable?> OnSetToOneRelationshipAsync<TResource>(TResource leftResource, HasOneAttribute hasOneRelationship,
+        IIdentifiable? rightResourceId, WriteOperationKind writeOperation, CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(leftResource, nameof(leftResource));
+        ArgumentGuard.NotNull(hasOneRelationship, nameof(hasOneRelationship));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(leftResource.GetClrType());
+
+        return await resourceDefinition.OnSetToOneRelationshipAsync((dynamic)leftResource, hasOneRelationship, rightResourceId, writeOperation,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task OnSetToManyRelationshipAsync<TResource>(TResource leftResource, HasManyAttribute hasManyRelationship,
+        ISet<IIdentifiable> rightResourceIds, WriteOperationKind writeOperation, CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(leftResource, nameof(leftResource));
+        ArgumentGuard.NotNull(hasManyRelationship, nameof(hasManyRelationship));
+        ArgumentGuard.NotNull(rightResourceIds, nameof(rightResourceIds));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(leftResource.GetClrType());
+        await resourceDefinition.OnSetToManyRelationshipAsync((dynamic)leftResource, hasManyRelationship, rightResourceIds, writeOperation, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task OnAddToRelationshipAsync<TResource>(TResource leftResource, HasManyAttribute hasManyRelationship, ISet<IIdentifiable> rightResourceIds,
+        CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(hasManyRelationship, nameof(hasManyRelationship));
+        ArgumentGuard.NotNull(rightResourceIds, nameof(rightResourceIds));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(leftResource.GetClrType());
+        await resourceDefinition.OnAddToRelationshipAsync((dynamic)leftResource, hasManyRelationship, rightResourceIds, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task OnRemoveFromRelationshipAsync<TResource>(TResource leftResource, HasManyAttribute hasManyRelationship,
+        ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(leftResource, nameof(leftResource));
+        ArgumentGuard.NotNull(hasManyRelationship, nameof(hasManyRelationship));
+        ArgumentGuard.NotNull(rightResourceIds, nameof(rightResourceIds));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(leftResource.GetClrType());
+        await resourceDefinition.OnRemoveFromRelationshipAsync((dynamic)leftResource, hasManyRelationship, rightResourceIds, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task OnWritingAsync<TResource>(TResource resource, WriteOperationKind writeOperation, CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resource.GetClrType());
+        await resourceDefinition.OnWritingAsync((dynamic)resource, writeOperation, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task OnWriteSucceededAsync<TResource>(TResource resource, WriteOperationKind writeOperation, CancellationToken cancellationToken)
+        where TResource : class, IIdentifiable
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resource.GetClrType());
+        await resourceDefinition.OnWriteSucceededAsync((dynamic)resource, writeOperation, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public void OnDeserialize(IIdentifiable resource)
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resource.GetClrType());
+        resourceDefinition.OnDeserialize((dynamic)resource);
+    }
+
+    /// <inheritdoc />
+    public void OnSerialize(IIdentifiable resource)
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        dynamic resourceDefinition = ResolveResourceDefinition(resource.GetClrType());
+        resourceDefinition.OnSerialize((dynamic)resource);
+    }
+
+    protected object ResolveResourceDefinition(Type resourceClrType)
+    {
+        ResourceType resourceType = _resourceGraph.GetResourceType(resourceClrType);
+        return ResolveResourceDefinition(resourceType);
+    }
+
+    protected virtual object ResolveResourceDefinition(ResourceType resourceType)
+    {
+        Type resourceDefinitionType = typeof(IResourceDefinition<,>).MakeGenericType(resourceType.ClrType, resourceType.IdentityClrType);
+        return _serviceProvider.GetRequiredService(resourceDefinitionType);
     }
 }

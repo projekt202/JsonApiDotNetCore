@@ -1,80 +1,87 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
 using System.Text;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
 
-namespace JsonApiDotNetCore.Queries.Expressions
+namespace JsonApiDotNetCore.Queries.Expressions;
+
+/// <summary>
+/// Represents a lookup table of sparse fieldsets per resource type.
+/// </summary>
+[PublicAPI]
+public class SparseFieldTableExpression : QueryExpression
 {
-    /// <summary>
-    /// Represents a lookup table of sparse fieldsets per resource type.
-    /// </summary>
-    [PublicAPI]
-    public class SparseFieldTableExpression : QueryExpression
+    public IImmutableDictionary<ResourceType, SparseFieldSetExpression> Table { get; }
+
+    public SparseFieldTableExpression(IImmutableDictionary<ResourceType, SparseFieldSetExpression> table)
     {
-        public IReadOnlyDictionary<ResourceContext, SparseFieldSetExpression> Table { get; }
+        ArgumentGuard.NotNullNorEmpty(table, nameof(table), "entries");
 
-        public SparseFieldTableExpression(IReadOnlyDictionary<ResourceContext, SparseFieldSetExpression> table)
+        Table = table;
+    }
+
+    public override TResult Accept<TArgument, TResult>(QueryExpressionVisitor<TArgument, TResult> visitor, TArgument argument)
+    {
+        return visitor.VisitSparseFieldTable(this, argument);
+    }
+
+    public override string ToString()
+    {
+        return InnerToString(false);
+    }
+
+    public override string ToFullString()
+    {
+        return InnerToString(true);
+    }
+
+    private string InnerToString(bool toFullString)
+    {
+        var builder = new StringBuilder();
+
+        foreach ((ResourceType resourceType, SparseFieldSetExpression fieldSet) in Table)
         {
-            ArgumentGuard.NotNullNorEmpty(table, nameof(table), "entries");
-
-            Table = table;
-        }
-
-        public override TResult Accept<TArgument, TResult>(QueryExpressionVisitor<TArgument, TResult> visitor, TArgument argument)
-        {
-            return visitor.VisitSparseFieldTable(this, argument);
-        }
-
-        public override string ToString()
-        {
-            var builder = new StringBuilder();
-
-            foreach ((ResourceContext resource, SparseFieldSetExpression fields) in Table)
+            if (builder.Length > 0)
             {
-                if (builder.Length > 0)
-                {
-                    builder.Append(',');
-                }
-
-                builder.Append(resource.PublicName);
-                builder.Append('(');
-                builder.Append(fields);
-                builder.Append(')');
+                builder.Append(',');
             }
 
-            return builder.ToString();
+            builder.Append(resourceType.PublicName);
+            builder.Append('(');
+            builder.Append(toFullString ? fieldSet.ToFullString() : fieldSet);
+            builder.Append(')');
         }
 
-        public override bool Equals(object obj)
+        return builder.ToString();
+    }
+
+    public override bool Equals(object? obj)
+    {
+        if (ReferenceEquals(this, obj))
         {
-            if (ReferenceEquals(this, obj))
-            {
-                return true;
-            }
-
-            if (obj is null || GetType() != obj.GetType())
-            {
-                return false;
-            }
-
-            var other = (SparseFieldTableExpression)obj;
-
-            return Table.SequenceEqual(other.Table);
+            return true;
         }
 
-        public override int GetHashCode()
+        if (obj is null || GetType() != obj.GetType())
         {
-            var hashCode = new HashCode();
-
-            foreach ((ResourceContext resourceContext, SparseFieldSetExpression sparseFieldSet) in Table)
-            {
-                hashCode.Add(resourceContext);
-                hashCode.Add(sparseFieldSet);
-            }
-
-            return hashCode.ToHashCode();
+            return false;
         }
+
+        var other = (SparseFieldTableExpression)obj;
+
+        return Table.DictionaryEqual(other.Table);
+    }
+
+    public override int GetHashCode()
+    {
+        var hashCode = new HashCode();
+
+        foreach ((ResourceType resourceType, SparseFieldSetExpression sparseFieldSet) in Table)
+        {
+            hashCode.Add(resourceType);
+            hashCode.Add(sparseFieldSet);
+        }
+
+        return hashCode.ToHashCode();
     }
 }

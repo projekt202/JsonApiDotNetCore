@@ -1,86 +1,81 @@
-using System.Collections.Generic;
+using System.Text.Json;
 using JetBrains.Annotations;
-using JsonApiDotNetCore.Configuration;
+using JsonApiDotNetCore.Middleware;
 using JsonApiDotNetCore.Resources.Annotations;
-using Newtonsoft.Json;
 
-namespace JsonApiDotNetCore.Resources
+namespace JsonApiDotNetCore.Resources;
+
+/// <inheritdoc />
+[PublicAPI]
+public sealed class ResourceChangeTracker<TResource> : IResourceChangeTracker<TResource>
+    where TResource : class, IIdentifiable
 {
-    /// <inheritdoc />
-    [PublicAPI]
-    public sealed class ResourceChangeTracker<TResource> : IResourceChangeTracker<TResource>
-        where TResource : class, IIdentifiable
+    private readonly IJsonApiRequest _request;
+    private readonly ITargetedFields _targetedFields;
+
+    private IDictionary<string, string>? _initiallyStoredAttributeValues;
+    private IDictionary<string, string>? _requestAttributeValues;
+    private IDictionary<string, string>? _finallyStoredAttributeValues;
+
+    public ResourceChangeTracker(IJsonApiRequest request, ITargetedFields targetedFields)
     {
-        private readonly IJsonApiOptions _options;
-        private readonly IResourceContextProvider _resourceContextProvider;
-        private readonly ITargetedFields _targetedFields;
+        ArgumentGuard.NotNull(request, nameof(request));
+        ArgumentGuard.NotNull(targetedFields, nameof(targetedFields));
 
-        private IDictionary<string, string> _initiallyStoredAttributeValues;
-        private IDictionary<string, string> _requestedAttributeValues;
-        private IDictionary<string, string> _finallyStoredAttributeValues;
+        _request = request;
+        _targetedFields = targetedFields;
+    }
 
-        public ResourceChangeTracker(IJsonApiOptions options, IResourceContextProvider resourceContextProvider, ITargetedFields targetedFields)
+    /// <inheritdoc />
+    public void SetInitiallyStoredAttributeValues(TResource resource)
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        _initiallyStoredAttributeValues = CreateAttributeDictionary(resource, _request.PrimaryResourceType!.Attributes);
+    }
+
+    /// <inheritdoc />
+    public void SetRequestAttributeValues(TResource resource)
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        _requestAttributeValues = CreateAttributeDictionary(resource, _targetedFields.Attributes);
+    }
+
+    /// <inheritdoc />
+    public void SetFinallyStoredAttributeValues(TResource resource)
+    {
+        ArgumentGuard.NotNull(resource, nameof(resource));
+
+        _finallyStoredAttributeValues = CreateAttributeDictionary(resource, _request.PrimaryResourceType!.Attributes);
+    }
+
+    private IDictionary<string, string> CreateAttributeDictionary(TResource resource, IEnumerable<AttrAttribute> attributes)
+    {
+        var result = new Dictionary<string, string>();
+
+        foreach (AttrAttribute attribute in attributes)
         {
-            ArgumentGuard.NotNull(options, nameof(options));
-            ArgumentGuard.NotNull(resourceContextProvider, nameof(resourceContextProvider));
-            ArgumentGuard.NotNull(targetedFields, nameof(targetedFields));
-
-            _options = options;
-            _resourceContextProvider = resourceContextProvider;
-            _targetedFields = targetedFields;
+            object? value = attribute.GetValue(resource);
+            string json = JsonSerializer.Serialize(value);
+            result.Add(attribute.PublicName, json);
         }
 
-        /// <inheritdoc />
-        public void SetInitiallyStoredAttributeValues(TResource resource)
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
+        return result;
+    }
 
-            ResourceContext resourceContext = _resourceContextProvider.GetResourceContext<TResource>();
-            _initiallyStoredAttributeValues = CreateAttributeDictionary(resource, resourceContext.Attributes);
-        }
-
-        /// <inheritdoc />
-        public void SetRequestedAttributeValues(TResource resource)
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            _requestedAttributeValues = CreateAttributeDictionary(resource, _targetedFields.Attributes);
-        }
-
-        /// <inheritdoc />
-        public void SetFinallyStoredAttributeValues(TResource resource)
-        {
-            ArgumentGuard.NotNull(resource, nameof(resource));
-
-            ResourceContext resourceContext = _resourceContextProvider.GetResourceContext<TResource>();
-            _finallyStoredAttributeValues = CreateAttributeDictionary(resource, resourceContext.Attributes);
-        }
-
-        private IDictionary<string, string> CreateAttributeDictionary(TResource resource, IEnumerable<AttrAttribute> attributes)
-        {
-            var result = new Dictionary<string, string>();
-
-            foreach (AttrAttribute attribute in attributes)
-            {
-                object value = attribute.GetValue(resource);
-                string json = JsonConvert.SerializeObject(value, _options.SerializerSettings);
-                result.Add(attribute.PublicName, json);
-            }
-
-            return result;
-        }
-
-        /// <inheritdoc />
-        public bool HasImplicitChanges()
+    /// <inheritdoc />
+    public bool HasImplicitChanges()
+    {
+        if (_initiallyStoredAttributeValues != null && _requestAttributeValues != null && _finallyStoredAttributeValues != null)
         {
             foreach (string key in _initiallyStoredAttributeValues.Keys)
             {
-                if (_requestedAttributeValues.ContainsKey(key))
+                if (_requestAttributeValues.TryGetValue(key, out string? requestValue))
                 {
-                    string requestedValue = _requestedAttributeValues[key];
                     string actualValue = _finallyStoredAttributeValues[key];
 
-                    if (requestedValue != actualValue)
+                    if (requestValue != actualValue)
                     {
                         return true;
                     }
@@ -96,8 +91,8 @@ namespace JsonApiDotNetCore.Resources
                     }
                 }
             }
-
-            return false;
         }
+
+        return false;
     }
 }

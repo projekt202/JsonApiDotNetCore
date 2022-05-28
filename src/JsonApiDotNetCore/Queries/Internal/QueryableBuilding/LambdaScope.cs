@@ -1,49 +1,47 @@
-using System;
 using System.Linq.Expressions;
 using JetBrains.Annotations;
-using JsonApiDotNetCore.Resources.Annotations;
 
-namespace JsonApiDotNetCore.Queries.Internal.QueryableBuilding
+namespace JsonApiDotNetCore.Queries.Internal.QueryableBuilding;
+
+/// <summary>
+/// Contains details on a lambda expression, such as the name of the selector "x" in "x => x.Name".
+/// </summary>
+[PublicAPI]
+public sealed class LambdaScope : IDisposable
 {
-    /// <summary>
-    /// Contains details on a lambda expression, such as the name of the selector "x" in "x => x.Name".
-    /// </summary>
-    [PublicAPI]
-    public sealed class LambdaScope : IDisposable
+    private readonly LambdaParameterNameScope _parameterNameScope;
+
+    public ParameterExpression Parameter { get; }
+    public Expression Accessor { get; }
+
+    private LambdaScope(LambdaParameterNameScope parameterNameScope, ParameterExpression parameter, Expression accessor)
     {
-        private readonly LambdaParameterNameScope _parameterNameScope;
+        _parameterNameScope = parameterNameScope;
+        Parameter = parameter;
+        Accessor = accessor;
+    }
 
-        public ParameterExpression Parameter { get; }
-        public Expression Accessor { get; }
-        public HasManyThroughAttribute HasManyThrough { get; }
+    public static LambdaScope Create(LambdaParameterNameFactory nameFactory, Type elementType, Expression? accessorExpression)
+    {
+        ArgumentGuard.NotNull(nameFactory, nameof(nameFactory));
+        ArgumentGuard.NotNull(elementType, nameof(elementType));
 
-        public LambdaScope(LambdaParameterNameFactory nameFactory, Type elementType, Expression accessorExpression, HasManyThroughAttribute hasManyThrough)
-        {
-            ArgumentGuard.NotNull(nameFactory, nameof(nameFactory));
-            ArgumentGuard.NotNull(elementType, nameof(elementType));
+        LambdaParameterNameScope parameterNameScope = nameFactory.Create(elementType.Name);
+        ParameterExpression parameter = Expression.Parameter(elementType, parameterNameScope.Name);
+        Expression accessor = accessorExpression ?? parameter;
 
-            _parameterNameScope = nameFactory.Create(elementType.Name);
-            Parameter = Expression.Parameter(elementType, _parameterNameScope.Name);
+        return new LambdaScope(parameterNameScope, parameter, accessor);
+    }
 
-            if (accessorExpression != null)
-            {
-                Accessor = accessorExpression;
-            }
-            else if (hasManyThrough != null)
-            {
-                Accessor = Expression.Property(Parameter, hasManyThrough.RightProperty);
-            }
-            else
-            {
-                Accessor = Parameter;
-            }
+    public LambdaScope WithAccessor(Expression accessorExpression)
+    {
+        ArgumentGuard.NotNull(accessorExpression, nameof(accessorExpression));
 
-            HasManyThrough = hasManyThrough;
-        }
+        return new LambdaScope(_parameterNameScope, Parameter, accessorExpression);
+    }
 
-        public void Dispose()
-        {
-            _parameterNameScope.Dispose();
-        }
+    public void Dispose()
+    {
+        _parameterNameScope.Dispose();
     }
 }

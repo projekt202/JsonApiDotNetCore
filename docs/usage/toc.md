@@ -1,6 +1,8 @@
 # [Resources](resources/index.md)
 ## [Attributes](resources/attributes.md)
 ## [Relationships](resources/relationships.md)
+## [Inheritance](resources/inheritance.md)
+## [Nullability](resources/nullability.md)
 
 # Reading data
 ## [Filtering](reading/filtering.md)

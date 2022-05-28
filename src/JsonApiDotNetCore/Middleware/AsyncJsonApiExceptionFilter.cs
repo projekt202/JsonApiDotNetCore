@@ -1,40 +1,38 @@
-using System.Threading.Tasks;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Serialization.Objects;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
-namespace JsonApiDotNetCore.Middleware
+namespace JsonApiDotNetCore.Middleware;
+
+/// <inheritdoc />
+[PublicAPI]
+public sealed class AsyncJsonApiExceptionFilter : IAsyncJsonApiExceptionFilter
 {
-    /// <inheritdoc />
-    [PublicAPI]
-    public class AsyncJsonApiExceptionFilter : IAsyncJsonApiExceptionFilter
+    private readonly IExceptionHandler _exceptionHandler;
+
+    public AsyncJsonApiExceptionFilter(IExceptionHandler exceptionHandler)
     {
-        private readonly IExceptionHandler _exceptionHandler;
+        ArgumentGuard.NotNull(exceptionHandler, nameof(exceptionHandler));
 
-        public AsyncJsonApiExceptionFilter(IExceptionHandler exceptionHandler)
+        _exceptionHandler = exceptionHandler;
+    }
+
+    /// <inheritdoc />
+    public Task OnExceptionAsync(ExceptionContext context)
+    {
+        ArgumentGuard.NotNull(context, nameof(context));
+
+        if (context.HttpContext.IsJsonApiRequest())
         {
-            ArgumentGuard.NotNull(exceptionHandler, nameof(exceptionHandler));
+            IReadOnlyList<ErrorObject> errors = _exceptionHandler.HandleException(context.Exception);
 
-            _exceptionHandler = exceptionHandler;
-        }
-
-        /// <inheritdoc />
-        public Task OnExceptionAsync(ExceptionContext context)
-        {
-            ArgumentGuard.NotNull(context, nameof(context));
-
-            if (context.HttpContext.IsJsonApiRequest())
+            context.Result = new ObjectResult(errors)
             {
-                ErrorDocument errorDocument = _exceptionHandler.HandleException(context.Exception);
-
-                context.Result = new ObjectResult(errorDocument)
-                {
-                    StatusCode = (int)errorDocument.GetErrorStatusCode()
-                };
-            }
-
-            return Task.CompletedTask;
+                StatusCode = (int)ErrorObject.GetResponseStatusCode(errors)
+            };
         }
+
+        return Task.CompletedTask;
     }
 }

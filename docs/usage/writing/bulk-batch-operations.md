@@ -17,10 +17,10 @@ To enable operations, add a controller to your project that inherits from `JsonA
 ```c#
 public sealed class OperationsController : JsonApiOperationsController
 {
-    public OperationsController(IJsonApiOptions options, ILoggerFactory loggerFactory,
-        IOperationsProcessor processor, IJsonApiRequest request,
-        ITargetedFields targetedFields)
-        : base(options, loggerFactory, processor, request, targetedFields)
+    public OperationsController(IJsonApiOptions options, IResourceGraph resourceGraph,
+        ILoggerFactory loggerFactory, IOperationsProcessor processor,
+        IJsonApiRequest request, ITargetedFields targetedFields)
+        : base(options, resourceGraph, loggerFactory, processor, request, targetedFields)
     {
     }
 }
@@ -81,14 +81,15 @@ Content-Type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
 }
 ```
 
-For example requests, see our suite of tests in JsonApiDotNetCoreExampleTests.IntegrationTests.AtomicOperations.
+For example requests, see our suite of tests in JsonApiDotNetCoreTests.IntegrationTests.AtomicOperations.
 
 ## Configuration
 
-The maximum number of operations per request defaults to 10, which you can change from Startup.cs:
+The maximum number of operations per request defaults to 10, which you can change at startup:
 
 ```c#
-services.AddJsonApi(options => options.MaximumOperationsPerRequest = 250);
+// Program.cs
+builder.Services.AddJsonApi(options => options.MaximumOperationsPerRequest = 250);
 ```
 
 Or, if you want to allow unconstrained, set it to `null` instead.

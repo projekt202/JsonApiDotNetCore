@@ -1,31 +1,36 @@
-using System.Collections.Generic;
 using JsonApiDotNetCore.Serialization.Objects;
 using Microsoft.AspNetCore.Mvc;
 
-namespace JsonApiDotNetCore.Controllers
+namespace JsonApiDotNetCore.Controllers;
+
+/// <summary>
+/// Provides helper methods to raise JSON:API compliant errors from controller actions.
+/// </summary>
+public abstract class CoreJsonApiController : ControllerBase
 {
-    /// <summary>
-    /// Provides helper methods to raise JSON:API compliant errors from controller actions.
-    /// </summary>
-    public abstract class CoreJsonApiController : ControllerBase
+    protected IActionResult Error(ErrorObject error)
     {
-        protected IActionResult Error(Error error)
+        ArgumentGuard.NotNull(error, nameof(error));
+
+        return new ObjectResult(error)
         {
-            ArgumentGuard.NotNull(error, nameof(error));
+            StatusCode = (int)error.StatusCode
+        };
+    }
 
-            return Error(error.AsEnumerable());
-        }
+    protected IActionResult Error(IEnumerable<ErrorObject> errors)
+    {
+        IReadOnlyList<ErrorObject>? errorList = ToErrorList(errors);
+        ArgumentGuard.NotNullNorEmpty(errorList, nameof(errors));
 
-        protected IActionResult Error(IEnumerable<Error> errors)
+        return new ObjectResult(errorList)
         {
-            ArgumentGuard.NotNull(errors, nameof(errors));
+            StatusCode = (int)ErrorObject.GetResponseStatusCode(errorList)
+        };
+    }
 
-            var document = new ErrorDocument(errors);
-
-            return new ObjectResult(document)
-            {
-                StatusCode = (int)document.GetErrorStatusCode()
-            };
-        }
+    private static IReadOnlyList<ErrorObject>? ToErrorList(IEnumerable<ErrorObject>? errors)
+    {
+        return errors?.ToArray();
     }
 }

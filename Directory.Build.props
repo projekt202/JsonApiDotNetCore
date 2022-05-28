@@ -1,15 +1,23 @@
 <Project>
   <PropertyGroup>
-    <NetCoreAppVersion>netcoreapp3.1</NetCoreAppVersion>
-    <AspNetCoreVersion>3.1.*</AspNetCoreVersion>
-    <EFCoreVersion>3.1.*</EFCoreVersion>
-    <NpgsqlPostgreSQLVersion>3.1.*</NpgsqlPostgreSQLVersion>
+    <TargetFrameworkName>net6.0</TargetFrameworkName>
+    <AspNetVersion>6.0.*</AspNetVersion>
+    <EFCoreVersion>6.0.*</EFCoreVersion>
+    <EFCorePostgresVersion>6.0.*</EFCorePostgresVersion>
+    <MicrosoftCodeAnalysisVersion>4.2.*</MicrosoftCodeAnalysisVersion>
+    <HumanizerVersion>2.14.1</HumanizerVersion>
+    <JsonApiDotNetCoreVersionPrefix>5.0.2.1</JsonApiDotNetCoreVersionPrefix>
     <CodeAnalysisRuleSet>$(MSBuildThisFileDirectory)CodingGuidelines.ruleset</CodeAnalysisRuleSet>
+    <WarningLevel>9999</WarningLevel>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="JetBrains.Annotations" Version="2021.1.0" PrivateAssets="All" />
-    <PackageReference Include="CSharpGuidelinesAnalyzer" Version="3.6.0" PrivateAssets="All" />
+    <PackageReference Include="JetBrains.Annotations" Version="2022.1.0" PrivateAssets="All" />
+    <PackageReference Include="CSharpGuidelinesAnalyzer" Version="3.8.1" PrivateAssets="All" />
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)CSharpGuidelinesAnalyzer.config" Visible="False" />
   </ItemGroup>
 
@@ -19,13 +27,14 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'">
+    <NoWarn>$(NoWarn);AV2210</NoWarn>
+  </PropertyGroup>
+
   <!-- Test Project Dependencies -->
   <PropertyGroup>
-    <BogusVersion>33.0.2</BogusVersion>
-    <CoverletVersion>3.0.3</CoverletVersion>
-    <FluentAssertionsVersion>5.10.3</FluentAssertionsVersion>
-    <MoqVersion>4.16.1</MoqVersion>
-    <XUnitVersion>2.4.*</XUnitVersion>
-    <TestSdkVersion>16.10.0</TestSdkVersion>
+    <CoverletVersion>3.1.2</CoverletVersion>
+    <MoqVersion>4.18.1</MoqVersion>
+    <TestSdkVersion>17.2.0</TestSdkVersion>
   </PropertyGroup>
 </Project>

@@ -1,265 +1,286 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Queries.Expressions;
-using JsonApiDotNetCore.Repositories;
 using JsonApiDotNetCore.Resources;
 using JsonApiDotNetCore.Resources.Annotations;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
-namespace JsonApiDotNetCore.Queries.Internal.QueryableBuilding
+namespace JsonApiDotNetCore.Queries.Internal.QueryableBuilding;
+
+/// <summary>
+/// Transforms <see cref="SparseFieldSetExpression" /> into
+/// <see cref="Queryable.Select{TSource, TKey}(IQueryable{TSource}, System.Linq.Expressions.Expression{System.Func{TSource,TKey}})" /> calls.
+/// </summary>
+[PublicAPI]
+public class SelectClauseBuilder : QueryClauseBuilder<object>
 {
-    /// <summary>
-    /// Transforms <see cref="SparseFieldSetExpression" /> into
-    /// <see cref="Queryable.Select{TSource, TKey}(IQueryable{TSource}, System.Linq.Expressions.Expression{System.Func{TSource,TKey}})" /> calls.
-    /// </summary>
-    [PublicAPI]
-    public class SelectClauseBuilder : QueryClauseBuilder<object>
+    private static readonly MethodInfo TypeGetTypeMethod = typeof(object).GetMethod("GetType")!;
+    private static readonly MethodInfo TypeOpEqualityMethod = typeof(Type).GetMethod("op_Equality")!;
+    private static readonly CollectionConverter CollectionConverter = new();
+    private static readonly ConstantExpression NullConstant = Expression.Constant(null);
+
+    private readonly Expression _source;
+    private readonly IModel _entityModel;
+    private readonly Type _extensionType;
+    private readonly LambdaParameterNameFactory _nameFactory;
+    private readonly IResourceFactory _resourceFactory;
+
+    public SelectClauseBuilder(Expression source, LambdaScope lambdaScope, IModel entityModel, Type extensionType, LambdaParameterNameFactory nameFactory,
+        IResourceFactory resourceFactory)
+        : base(lambdaScope)
     {
-        private static readonly CollectionConverter CollectionConverter = new CollectionConverter();
-        private static readonly ConstantExpression NullConstant = Expression.Constant(null);
+        ArgumentGuard.NotNull(source, nameof(source));
+        ArgumentGuard.NotNull(entityModel, nameof(entityModel));
+        ArgumentGuard.NotNull(extensionType, nameof(extensionType));
+        ArgumentGuard.NotNull(nameFactory, nameof(nameFactory));
+        ArgumentGuard.NotNull(resourceFactory, nameof(resourceFactory));
 
-        private readonly Expression _source;
-        private readonly IModel _entityModel;
-        private readonly Type _extensionType;
-        private readonly LambdaParameterNameFactory _nameFactory;
-        private readonly IResourceFactory _resourceFactory;
-        private readonly IResourceContextProvider _resourceContextProvider;
+        _source = source;
+        _entityModel = entityModel;
+        _extensionType = extensionType;
+        _nameFactory = nameFactory;
+        _resourceFactory = resourceFactory;
+    }
 
-        public SelectClauseBuilder(Expression source, LambdaScope lambdaScope, IModel entityModel, Type extensionType, LambdaParameterNameFactory nameFactory,
-            IResourceFactory resourceFactory, IResourceContextProvider resourceContextProvider)
-            : base(lambdaScope)
+    public Expression ApplySelect(FieldSelection selection, ResourceType resourceType)
+    {
+        ArgumentGuard.NotNull(selection, nameof(selection));
+
+        Expression bodyInitializer = CreateLambdaBodyInitializer(selection, resourceType, LambdaScope, false);
+
+        LambdaExpression lambda = Expression.Lambda(bodyInitializer, LambdaScope.Parameter);
+
+        return SelectExtensionMethodCall(_source, LambdaScope.Parameter.Type, lambda);
+    }
+
+    private Expression CreateLambdaBodyInitializer(FieldSelection selection, ResourceType resourceType, LambdaScope lambdaScope,
+        bool lambdaAccessorRequiresTestForNull)
+    {
+        IEntityType entityType = _entityModel.FindEntityType(resourceType.ClrType)!;
+        IEntityType[] concreteEntityTypes = entityType.GetConcreteDerivedTypesInclusive().ToArray();
+
+        Expression bodyInitializer = concreteEntityTypes.Length > 1
+            ? CreateLambdaBodyInitializerForTypeHierarchy(selection, resourceType, concreteEntityTypes, lambdaScope)
+            : CreateLambdaBodyInitializerForSingleType(selection, resourceType, lambdaScope);
+
+        if (!lambdaAccessorRequiresTestForNull)
         {
-            ArgumentGuard.NotNull(source, nameof(source));
-            ArgumentGuard.NotNull(entityModel, nameof(entityModel));
-            ArgumentGuard.NotNull(extensionType, nameof(extensionType));
-            ArgumentGuard.NotNull(nameFactory, nameof(nameFactory));
-            ArgumentGuard.NotNull(resourceFactory, nameof(resourceFactory));
-            ArgumentGuard.NotNull(resourceContextProvider, nameof(resourceContextProvider));
-
-            _source = source;
-            _entityModel = entityModel;
-            _extensionType = extensionType;
-            _nameFactory = nameFactory;
-            _resourceFactory = resourceFactory;
-            _resourceContextProvider = resourceContextProvider;
+            return bodyInitializer;
         }
 
-        public Expression ApplySelect(IDictionary<ResourceFieldAttribute, QueryLayer> selectors, ResourceContext resourceContext)
+        return TestForNull(lambdaScope.Accessor, bodyInitializer);
+    }
+
+    private Expression CreateLambdaBodyInitializerForTypeHierarchy(FieldSelection selection, ResourceType baseResourceType,
+        IEnumerable<IEntityType> concreteEntityTypes, LambdaScope lambdaScope)
+    {
+        IReadOnlySet<ResourceType> resourceTypes = selection.GetResourceTypes();
+        Expression rootCondition = lambdaScope.Accessor;
+
+        foreach (IEntityType entityType in concreteEntityTypes)
         {
-            ArgumentGuard.NotNull(selectors, nameof(selectors));
+            ResourceType? resourceType = resourceTypes.SingleOrDefault(type => type.ClrType == entityType.ClrType);
 
-            if (!selectors.Any())
+            if (resourceType != null)
             {
-                return _source;
-            }
+                FieldSelectors fieldSelectors = selection.GetOrCreateSelectors(resourceType);
 
-            Expression bodyInitializer = CreateLambdaBodyInitializer(selectors, resourceContext, LambdaScope, false);
-
-            LambdaExpression lambda = Expression.Lambda(bodyInitializer, LambdaScope.Parameter);
-
-            return SelectExtensionMethodCall(_source, LambdaScope.Parameter.Type, lambda);
-        }
-
-        private Expression CreateLambdaBodyInitializer(IDictionary<ResourceFieldAttribute, QueryLayer> selectors, ResourceContext resourceContext,
-            LambdaScope lambdaScope, bool lambdaAccessorRequiresTestForNull)
-        {
-            ICollection<PropertySelector> propertySelectors = ToPropertySelectors(selectors, resourceContext, lambdaScope.Accessor.Type);
-
-            MemberBinding[] propertyAssignments =
-                propertySelectors.Select(selector => CreatePropertyAssignment(selector, lambdaScope)).Cast<MemberBinding>().ToArray();
-
-            NewExpression newExpression = _resourceFactory.CreateNewExpression(lambdaScope.Accessor.Type);
-            Expression memberInit = Expression.MemberInit(newExpression, propertyAssignments);
-
-            if (lambdaScope.HasManyThrough != null)
-            {
-                MemberBinding outerPropertyAssignment = Expression.Bind(lambdaScope.HasManyThrough.RightProperty, memberInit);
-
-                NewExpression outerNewExpression = _resourceFactory.CreateNewExpression(lambdaScope.HasManyThrough.ThroughType);
-                memberInit = Expression.MemberInit(outerNewExpression, outerPropertyAssignment);
-            }
-
-            if (!lambdaAccessorRequiresTestForNull)
-            {
-                return memberInit;
-            }
-
-            return TestForNull(lambdaScope.Accessor, memberInit);
-        }
-
-        private ICollection<PropertySelector> ToPropertySelectors(IDictionary<ResourceFieldAttribute, QueryLayer> resourceFieldSelectors,
-            ResourceContext resourceContext, Type elementType)
-        {
-            var propertySelectors = new Dictionary<PropertyInfo, PropertySelector>();
-
-            // If a read-only attribute is selected, its value likely depends on another property, so select all resource properties.
-            bool includesReadOnlyAttribute = resourceFieldSelectors.Any(selector =>
-                selector.Key is AttrAttribute attribute && attribute.Property.SetMethod == null);
-
-            bool containsOnlyRelationships = resourceFieldSelectors.All(selector => selector.Key is RelationshipAttribute);
-
-            foreach (KeyValuePair<ResourceFieldAttribute, QueryLayer> fieldSelector in resourceFieldSelectors)
-            {
-                var propertySelector = new PropertySelector(fieldSelector.Key, fieldSelector.Value);
-
-                if (propertySelector.Property.SetMethod != null)
+                if (!fieldSelectors.IsEmpty)
                 {
-                    propertySelectors[propertySelector.Property] = propertySelector;
+                    ICollection<PropertySelector> propertySelectors = ToPropertySelectors(fieldSelectors, resourceType, entityType.ClrType);
+
+                    MemberBinding[] propertyAssignments = propertySelectors.Select(selector => CreatePropertyAssignment(selector, lambdaScope))
+                        .Cast<MemberBinding>().ToArray();
+
+                    NewExpression createInstance = _resourceFactory.CreateNewExpression(entityType.ClrType);
+                    MemberInitExpression memberInit = Expression.MemberInit(createInstance, propertyAssignments);
+                    UnaryExpression castToBaseType = Expression.Convert(memberInit, baseResourceType.ClrType);
+
+                    BinaryExpression typeCheck = CreateRuntimeTypeCheck(lambdaScope, entityType.ClrType);
+                    rootCondition = Expression.Condition(typeCheck, castToBaseType, rootCondition);
                 }
             }
-
-            if (includesReadOnlyAttribute || containsOnlyRelationships)
-            {
-                IEntityType entityModel = _entityModel.GetEntityTypes().Single(type => type.ClrType == elementType);
-                IEnumerable<IProperty> entityProperties = entityModel.GetProperties().Where(property => !property.IsShadowProperty()).ToArray();
-
-                foreach (IProperty entityProperty in entityProperties)
-                {
-                    var propertySelector = new PropertySelector(entityProperty.PropertyInfo);
-
-                    if (propertySelector.Property.SetMethod != null)
-                    {
-                        propertySelectors[propertySelector.Property] = propertySelector;
-                    }
-                }
-            }
-
-            foreach (EagerLoadAttribute eagerLoad in resourceContext.EagerLoads)
-            {
-                var propertySelector = new PropertySelector(eagerLoad.Property);
-
-                // When an entity navigation property is decorated with both EagerLoadAttribute and RelationshipAttribute,
-                // it may already exist with a sub-layer. So do not overwrite in that case.
-                if (!propertySelectors.ContainsKey(propertySelector.Property))
-                {
-                    propertySelectors[propertySelector.Property] = propertySelector;
-                }                
-            }
-
-            return propertySelectors.Values;
         }
 
-        private MemberAssignment CreatePropertyAssignment(PropertySelector selector, LambdaScope lambdaScope)
+        return rootCondition;
+    }
+
+    private static BinaryExpression CreateRuntimeTypeCheck(LambdaScope lambdaScope, Type concreteClrType)
+    {
+        // Emitting "resource.GetType() == typeof(Article)" instead of "resource is Article" so we don't need to check for most-derived
+        // types first. This way, we can fallback to "anything else" at the end without worrying about order.
+
+        Expression concreteTypeConstant = concreteClrType.CreateTupleAccessExpressionForConstant(typeof(Type));
+        MethodCallExpression getTypeCall = Expression.Call(lambdaScope.Accessor, TypeGetTypeMethod);
+
+        return Expression.MakeBinary(ExpressionType.Equal, getTypeCall, concreteTypeConstant, false, TypeOpEqualityMethod);
+    }
+
+    private Expression CreateLambdaBodyInitializerForSingleType(FieldSelection selection, ResourceType resourceType, LambdaScope lambdaScope)
+    {
+        FieldSelectors fieldSelectors = selection.GetOrCreateSelectors(resourceType);
+        ICollection<PropertySelector> propertySelectors = ToPropertySelectors(fieldSelectors, resourceType, lambdaScope.Accessor.Type);
+
+        MemberBinding[] propertyAssignments =
+            propertySelectors.Select(selector => CreatePropertyAssignment(selector, lambdaScope)).Cast<MemberBinding>().ToArray();
+
+        NewExpression createInstance = _resourceFactory.CreateNewExpression(lambdaScope.Accessor.Type);
+        return Expression.MemberInit(createInstance, propertyAssignments);
+    }
+
+    private ICollection<PropertySelector> ToPropertySelectors(FieldSelectors fieldSelectors, ResourceType resourceType, Type elementType)
+    {
+        var propertySelectors = new Dictionary<PropertyInfo, PropertySelector>();
+
+        if (fieldSelectors.ContainsReadOnlyAttribute || fieldSelectors.ContainsOnlyRelationships)
         {
-            MemberExpression propertyAccess = Expression.Property(lambdaScope.Accessor, selector.Property);
+            // If a read-only attribute is selected, its calculated value likely depends on another property, so select all properties.
+            // And only selecting relationships implicitly means to select all attributes too.
 
-            Expression assignmentRightHandSide = propertyAccess;
-
-            if (selector.NextLayer != null)
-            {
-                var hasManyThrough = selector.OriginatingField as HasManyThroughAttribute;
-                var lambdaScopeFactory = new LambdaScopeFactory(_nameFactory, hasManyThrough);
-
-                assignmentRightHandSide = CreateAssignmentRightHandSideForLayer(selector.NextLayer, lambdaScope, propertyAccess,
-                    selector.Property, lambdaScopeFactory);
-            }
-
-            return Expression.Bind(selector.Property, assignmentRightHandSide);
+            IncludeAllAttributes(elementType, propertySelectors);
         }
 
-        private Expression CreateAssignmentRightHandSideForLayer(QueryLayer layer, LambdaScope outerLambdaScope, MemberExpression propertyAccess,
-            PropertyInfo selectorPropertyInfo, LambdaScopeFactory lambdaScopeFactory)
+        IncludeFields(fieldSelectors, propertySelectors);
+        IncludeEagerLoads(resourceType, propertySelectors);
+
+        return propertySelectors.Values;
+    }
+
+    private void IncludeAllAttributes(Type elementType, Dictionary<PropertyInfo, PropertySelector> propertySelectors)
+    {
+        IEntityType entityModel = _entityModel.GetEntityTypes().Single(type => type.ClrType == elementType);
+        IEnumerable<IProperty> entityProperties = entityModel.GetProperties().Where(property => !property.IsShadowProperty()).ToArray();
+
+        foreach (IProperty entityProperty in entityProperties)
         {
-            Type collectionElementType = CollectionConverter.TryGetCollectionElementType(selectorPropertyInfo.PropertyType);
-            Type bodyElementType = collectionElementType ?? selectorPropertyInfo.PropertyType;
+            var propertySelector = new PropertySelector(entityProperty.PropertyInfo!);
+            IncludeWritableProperty(propertySelector, propertySelectors);
+        }
+    }
 
-            if (collectionElementType != null)
+    private static void IncludeFields(FieldSelectors fieldSelectors, Dictionary<PropertyInfo, PropertySelector> propertySelectors)
+    {
+        foreach ((ResourceFieldAttribute resourceField, QueryLayer? queryLayer) in fieldSelectors)
+        {
+            var propertySelector = new PropertySelector(resourceField.Property, queryLayer);
+            IncludeWritableProperty(propertySelector, propertySelectors);
+        }
+    }
+
+    private static void IncludeWritableProperty(PropertySelector propertySelector, Dictionary<PropertyInfo, PropertySelector> propertySelectors)
+    {
+        if (propertySelector.Property.SetMethod != null)
+        {
+            propertySelectors[propertySelector.Property] = propertySelector;
+        }
+    }
+
+    private static void IncludeEagerLoads(ResourceType resourceType, Dictionary<PropertyInfo, PropertySelector> propertySelectors)
+    {
+        foreach (EagerLoadAttribute eagerLoad in resourceType.EagerLoads)
+        {
+            var propertySelector = new PropertySelector(eagerLoad.Property);
+
+            // When an entity navigation property is decorated with both EagerLoadAttribute and RelationshipAttribute,
+            // it may already exist with a sub-layer. So do not overwrite in that case.
+            if (!propertySelectors.ContainsKey(propertySelector.Property))
             {
-                return CreateCollectionInitializer(outerLambdaScope, selectorPropertyInfo, bodyElementType, layer, lambdaScopeFactory);
+                propertySelectors[propertySelector.Property] = propertySelector;
             }
+        }
+    }
 
-            if (layer.Projection.IsNullOrEmpty())
-            {
-                return propertyAccess;
-            }
+    private MemberAssignment CreatePropertyAssignment(PropertySelector propertySelector, LambdaScope lambdaScope)
+    {
+        bool requiresUpCast = lambdaScope.Accessor.Type != propertySelector.Property.DeclaringType &&
+            lambdaScope.Accessor.Type.IsAssignableFrom(propertySelector.Property.DeclaringType);
 
-            using LambdaScope scope = lambdaScopeFactory.CreateScope(bodyElementType, propertyAccess);
-            return CreateLambdaBodyInitializer(layer.Projection, layer.ResourceContext, scope, true);
+        MemberExpression propertyAccess = requiresUpCast
+            ? Expression.MakeMemberAccess(Expression.Convert(lambdaScope.Accessor, propertySelector.Property.DeclaringType!), propertySelector.Property)
+            : Expression.Property(lambdaScope.Accessor, propertySelector.Property);
+
+        Expression assignmentRightHandSide = propertyAccess;
+
+        if (propertySelector.NextLayer != null)
+        {
+            var lambdaScopeFactory = new LambdaScopeFactory(_nameFactory);
+
+            assignmentRightHandSide = CreateAssignmentRightHandSideForLayer(propertySelector.NextLayer, lambdaScope, propertyAccess, propertySelector.Property,
+                lambdaScopeFactory);
         }
 
-        private Expression CreateCollectionInitializer(LambdaScope lambdaScope, PropertyInfo collectionProperty, Type elementType, QueryLayer layer,
-            LambdaScopeFactory lambdaScopeFactory)
+        return Expression.Bind(propertySelector.Property, assignmentRightHandSide);
+    }
+
+    private Expression CreateAssignmentRightHandSideForLayer(QueryLayer layer, LambdaScope outerLambdaScope, MemberExpression propertyAccess,
+        PropertyInfo selectorPropertyInfo, LambdaScopeFactory lambdaScopeFactory)
+    {
+        Type? collectionElementType = CollectionConverter.FindCollectionElementType(selectorPropertyInfo.PropertyType);
+        Type bodyElementType = collectionElementType ?? selectorPropertyInfo.PropertyType;
+
+        if (collectionElementType != null)
         {
-            MemberExpression propertyExpression = Expression.Property(lambdaScope.Accessor, collectionProperty);
-
-            var builder = new QueryableBuilder(propertyExpression, elementType, typeof(Enumerable), _nameFactory, _resourceFactory, _resourceContextProvider,
-                _entityModel, lambdaScopeFactory);
-
-            Expression layerExpression = builder.ApplyQuery(layer);
-
-            // Earlier versions of EF Core 3.x failed to understand `query.ToHashSet()`, so we emit `new HashSet(query)` instead.
-            // Interestingly, EF Core 5 RC1 fails to understand `new HashSet(query)`, so we emit `query.ToHashSet()` instead.
-            // https://github.com/dotnet/efcore/issues/22902
-
-            if (EntityFrameworkCoreSupport.Version.Major < 5)
-            {
-                Type enumerableOfElementType = typeof(IEnumerable<>).MakeGenericType(elementType);
-                Type typedCollection = CollectionConverter.ToConcreteCollectionType(collectionProperty.PropertyType);
-
-                ConstructorInfo typedCollectionConstructor = typedCollection.GetConstructor(enumerableOfElementType.AsArray());
-
-                if (typedCollectionConstructor == null)
-                {
-                    throw new InvalidOperationException($"Constructor on '{typedCollection.Name}' that accepts '{enumerableOfElementType.Name}' not found.");
-                }
-
-                return Expression.New(typedCollectionConstructor, layerExpression);
-            }
-
-            string operationName = CollectionConverter.TypeCanContainHashSet(collectionProperty.PropertyType) ? "ToHashSet" : "ToList";
-            return CopyCollectionExtensionMethodCall(layerExpression, operationName, elementType);
+            return CreateCollectionInitializer(outerLambdaScope, selectorPropertyInfo, bodyElementType, layer, lambdaScopeFactory);
         }
 
-        private static Expression TestForNull(Expression expressionToTest, Expression ifFalseExpression)
+        if (layer.Selection == null || layer.Selection.IsEmpty)
         {
-            BinaryExpression equalsNull = Expression.Equal(expressionToTest, NullConstant);
-            return Expression.Condition(equalsNull, Expression.Convert(NullConstant, expressionToTest.Type), ifFalseExpression);
+            return propertyAccess;
         }
 
-        private static Expression CopyCollectionExtensionMethodCall(Expression source, string operationName, Type elementType)
+        using LambdaScope scope = lambdaScopeFactory.CreateScope(bodyElementType, propertyAccess);
+        return CreateLambdaBodyInitializer(layer.Selection, layer.ResourceType, scope, true);
+    }
+
+    private Expression CreateCollectionInitializer(LambdaScope lambdaScope, PropertyInfo collectionProperty, Type elementType, QueryLayer layer,
+        LambdaScopeFactory lambdaScopeFactory)
+    {
+        MemberExpression propertyExpression = Expression.Property(lambdaScope.Accessor, collectionProperty);
+
+        var builder = new QueryableBuilder(propertyExpression, elementType, typeof(Enumerable), _nameFactory, _resourceFactory, _entityModel,
+            lambdaScopeFactory);
+
+        Expression layerExpression = builder.ApplyQuery(layer);
+
+        string operationName = CollectionConverter.TypeCanContainHashSet(collectionProperty.PropertyType) ? "ToHashSet" : "ToList";
+        return CopyCollectionExtensionMethodCall(layerExpression, operationName, elementType);
+    }
+
+    private static Expression TestForNull(Expression expressionToTest, Expression ifFalseExpression)
+    {
+        BinaryExpression equalsNull = Expression.Equal(expressionToTest, NullConstant);
+        return Expression.Condition(equalsNull, Expression.Convert(NullConstant, expressionToTest.Type), ifFalseExpression);
+    }
+
+    private static Expression CopyCollectionExtensionMethodCall(Expression source, string operationName, Type elementType)
+    {
+        return Expression.Call(typeof(Enumerable), operationName, elementType.AsArray(), source);
+    }
+
+    private Expression SelectExtensionMethodCall(Expression source, Type elementType, Expression selectBody)
+    {
+        Type[] typeArguments = ArrayFactory.Create(elementType, elementType);
+        return Expression.Call(_extensionType, "Select", typeArguments, source, selectBody);
+    }
+
+    private sealed class PropertySelector
+    {
+        public PropertyInfo Property { get; }
+        public QueryLayer? NextLayer { get; }
+
+        public PropertySelector(PropertyInfo property, QueryLayer? nextLayer = null)
         {
-            return Expression.Call(typeof(Enumerable), operationName, elementType.AsArray(), source);
+            ArgumentGuard.NotNull(property, nameof(property));
+
+            Property = property;
+            NextLayer = nextLayer;
         }
 
-        private Expression SelectExtensionMethodCall(Expression source, Type elementType, Expression selectorBody)
+        public override string ToString()
         {
-            Type[] typeArguments = ArrayFactory.Create(elementType, elementType);
-            return Expression.Call(_extensionType, "Select", typeArguments, source, selectorBody);
-        }
-
-        private sealed class PropertySelector
-        {
-            public PropertyInfo Property { get; }
-            public ResourceFieldAttribute OriginatingField { get; }
-            public QueryLayer NextLayer { get; }
-
-            public PropertySelector(PropertyInfo property, QueryLayer nextLayer = null)
-            {
-                ArgumentGuard.NotNull(property, nameof(property));
-
-                Property = property;
-                NextLayer = nextLayer;
-            }
-
-            public PropertySelector(ResourceFieldAttribute field, QueryLayer nextLayer = null)
-            {
-                ArgumentGuard.NotNull(field, nameof(field));
-
-                OriginatingField = field;
-                NextLayer = nextLayer;
-                Property = field is HasManyThroughAttribute hasManyThrough ? hasManyThrough.ThroughProperty : field.Property;
-            }
-
-            public override string ToString()
-            {
-                return "Property: " + (NextLayer != null ? Property.Name + "..." : Property.Name);
-            }
+            return $"Property: {(NextLayer != null ? $"{Property.Name}..." : Property.Name)}";
         }
     }
 }

@@ -1,6 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
 using System.Reflection;
 using Humanizer;
 using JetBrains.Annotations;
@@ -9,34 +7,29 @@ using JsonApiDotNetCore.Queries.Expressions;
 using JsonApiDotNetCore.Resources;
 using JsonApiDotNetCore.Resources.Annotations;
 
-namespace JsonApiDotNetCore.Queries.Internal.Parsing
+namespace JsonApiDotNetCore.Queries.Internal.Parsing;
+
+[PublicAPI]
+public class FilterParser : QueryExpressionParser
 {
-    [PublicAPI]
-    public class FilterParser : QueryExpressionParser
+    private readonly IResourceFactory _resourceFactory;
+    private readonly Action<ResourceFieldAttribute, ResourceType, string>? _validateSingleFieldCallback;
+    private ResourceType? _resourceTypeInScope;
+
+    public FilterParser(IResourceFactory resourceFactory, Action<ResourceFieldAttribute, ResourceType, string>? validateSingleFieldCallback = null)
     {
-        private readonly IResourceContextProvider _resourceContextProvider;
-        private readonly IResourceFactory _resourceFactory;
-        private readonly Action<ResourceFieldAttribute, ResourceContext, string> _validateSingleFieldCallback;
-        private ResourceContext _resourceContextInScope;
+        ArgumentGuard.NotNull(resourceFactory, nameof(resourceFactory));
 
-        public FilterParser(IResourceContextProvider resourceContextProvider, IResourceFactory resourceFactory,
-            Action<ResourceFieldAttribute, ResourceContext, string> validateSingleFieldCallback = null)
-            : base(resourceContextProvider)
+        _resourceFactory = resourceFactory;
+        _validateSingleFieldCallback = validateSingleFieldCallback;
+    }
+
+    public FilterExpression Parse(string source, ResourceType resourceTypeInScope)
+    {
+        ArgumentGuard.NotNull(resourceTypeInScope, nameof(resourceTypeInScope));
+
+        return InScopeOfResourceType(resourceTypeInScope, () =>
         {
-            ArgumentGuard.NotNull(resourceContextProvider, nameof(resourceContextProvider));
-            ArgumentGuard.NotNull(resourceFactory, nameof(resourceFactory));
-
-            _resourceContextProvider = resourceContextProvider;
-            _resourceFactory = resourceFactory;
-            _validateSingleFieldCallback = validateSingleFieldCallback;
-        }
-
-        public FilterExpression Parse(string source, ResourceContext resourceContextInScope)
-        {
-            ArgumentGuard.NotNull(resourceContextInScope, nameof(resourceContextInScope));
-
-            _resourceContextInScope = resourceContextInScope;
-
             Tokenize(source);
 
             FilterExpression expression = ParseFilter();
@@ -44,312 +37,429 @@ namespace JsonApiDotNetCore.Queries.Internal.Parsing
             AssertTokenStackIsEmpty();
 
             return expression;
-        }
+        });
+    }
 
-        protected FilterExpression ParseFilter()
+    protected FilterExpression ParseFilter()
+    {
+        if (TokenStack.TryPeek(out Token? nextToken) && nextToken.Kind == TokenKind.Text)
         {
-            if (TokenStack.TryPeek(out Token nextToken) && nextToken.Kind == TokenKind.Text)
+            switch (nextToken.Value)
             {
-                switch (nextToken.Value)
+                case Keywords.Not:
                 {
-                    case Keywords.Not:
-                    {
-                        return ParseNot();
-                    }
-                    case Keywords.And:
-                    case Keywords.Or:
-                    {
-                        return ParseLogical(nextToken.Value);
-                    }
-                    case Keywords.Equals:
-                    case Keywords.LessThan:
-                    case Keywords.LessOrEqual:
-                    case Keywords.GreaterThan:
-                    case Keywords.GreaterOrEqual:
-                    {
-                        return ParseComparison(nextToken.Value);
-                    }
-                    case Keywords.Contains:
-                    case Keywords.StartsWith:
-                    case Keywords.EndsWith:
-                    {
-                        return ParseTextMatch(nextToken.Value);
-                    }
-                    case Keywords.Any:
-                    {
-                        return ParseAny();
-                    }
-                    case Keywords.Has:
-                    {
-                        return ParseHas();
-                    }
+                    return ParseNot();
+                }
+                case Keywords.And:
+                case Keywords.Or:
+                {
+                    return ParseLogical(nextToken.Value);
+                }
+                case Keywords.Equals:
+                case Keywords.LessThan:
+                case Keywords.LessOrEqual:
+                case Keywords.GreaterThan:
+                case Keywords.GreaterOrEqual:
+                {
+                    return ParseComparison(nextToken.Value);
+                }
+                case Keywords.Contains:
+                case Keywords.StartsWith:
+                case Keywords.EndsWith:
+                {
+                    return ParseTextMatch(nextToken.Value);
+                }
+                case Keywords.Any:
+                {
+                    return ParseAny();
+                }
+                case Keywords.Has:
+                {
+                    return ParseHas();
+                }
+                case Keywords.IsType:
+                {
+                    return ParseIsType();
                 }
             }
-
-            throw new QueryParseException("Filter function expected.");
         }
 
-        protected NotExpression ParseNot()
+        throw new QueryParseException("Filter function expected.");
+    }
+
+    protected NotExpression ParseNot()
+    {
+        EatText(Keywords.Not);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        FilterExpression child = ParseFilter();
+
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        return new NotExpression(child);
+    }
+
+    protected LogicalExpression ParseLogical(string operatorName)
+    {
+        EatText(operatorName);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        ImmutableArray<FilterExpression>.Builder termsBuilder = ImmutableArray.CreateBuilder<FilterExpression>();
+
+        FilterExpression term = ParseFilter();
+        termsBuilder.Add(term);
+
+        EatSingleCharacterToken(TokenKind.Comma);
+
+        term = ParseFilter();
+        termsBuilder.Add(term);
+
+        while (TokenStack.TryPeek(out Token? nextToken) && nextToken.Kind == TokenKind.Comma)
         {
-            EatText(Keywords.Not);
-            EatSingleCharacterToken(TokenKind.OpenParen);
-
-            FilterExpression child = ParseFilter();
-
-            EatSingleCharacterToken(TokenKind.CloseParen);
-
-            return new NotExpression(child);
-        }
-
-        protected LogicalExpression ParseLogical(string operatorName)
-        {
-            EatText(operatorName);
-            EatSingleCharacterToken(TokenKind.OpenParen);
-
-            var terms = new List<FilterExpression>();
-
-            FilterExpression term = ParseFilter();
-            terms.Add(term);
-
             EatSingleCharacterToken(TokenKind.Comma);
 
             term = ParseFilter();
-            terms.Add(term);
+            termsBuilder.Add(term);
+        }
 
-            while (TokenStack.TryPeek(out Token nextToken) && nextToken.Kind == TokenKind.Comma)
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        var logicalOperator = Enum.Parse<LogicalOperator>(operatorName.Pascalize());
+        return new LogicalExpression(logicalOperator, termsBuilder.ToImmutable());
+    }
+
+    protected ComparisonExpression ParseComparison(string operatorName)
+    {
+        var comparisonOperator = Enum.Parse<ComparisonOperator>(operatorName.Pascalize());
+
+        EatText(operatorName);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        // Allow equality comparison of a HasOne relationship with null.
+        FieldChainRequirements leftChainRequirements = comparisonOperator == ComparisonOperator.Equals
+            ? FieldChainRequirements.EndsInAttribute | FieldChainRequirements.EndsInToOne
+            : FieldChainRequirements.EndsInAttribute;
+
+        QueryExpression leftTerm = ParseCountOrField(leftChainRequirements);
+
+        EatSingleCharacterToken(TokenKind.Comma);
+
+        QueryExpression rightTerm = ParseCountOrConstantOrNullOrField(FieldChainRequirements.EndsInAttribute);
+
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        if (leftTerm is ResourceFieldChainExpression leftChain)
+        {
+            if (leftChainRequirements.HasFlag(FieldChainRequirements.EndsInToOne) && rightTerm is not NullConstantExpression)
             {
-                EatSingleCharacterToken(TokenKind.Comma);
-
-                term = ParseFilter();
-                terms.Add(term);
+                // Run another pass over left chain to have it fail when chain ends in relationship.
+                OnResolveFieldChain(leftChain.ToString(), FieldChainRequirements.EndsInAttribute);
             }
 
-            EatSingleCharacterToken(TokenKind.CloseParen);
+            PropertyInfo leftProperty = leftChain.Fields[^1].Property;
 
-            var logicalOperator = Enum.Parse<LogicalOperator>(operatorName.Pascalize());
-            return new LogicalExpression(logicalOperator, terms);
-        }
-
-        protected ComparisonExpression ParseComparison(string operatorName)
-        {
-            var comparisonOperator = Enum.Parse<ComparisonOperator>(operatorName.Pascalize());
-
-            EatText(operatorName);
-            EatSingleCharacterToken(TokenKind.OpenParen);
-
-            // Allow equality comparison of a HasOne relationship with null.
-            FieldChainRequirements leftChainRequirements = comparisonOperator == ComparisonOperator.Equals
-                ? FieldChainRequirements.EndsInAttribute | FieldChainRequirements.EndsInToOne
-                : FieldChainRequirements.EndsInAttribute;
-
-            QueryExpression leftTerm = ParseCountOrField(leftChainRequirements);
-
-            EatSingleCharacterToken(TokenKind.Comma);
-
-            QueryExpression rightTerm = ParseCountOrConstantOrNullOrField(FieldChainRequirements.EndsInAttribute);
-
-            EatSingleCharacterToken(TokenKind.CloseParen);
-
-            if (leftTerm is ResourceFieldChainExpression leftChain)
+            if (leftProperty.Name == nameof(Identifiable<object>.Id) && rightTerm is LiteralConstantExpression rightConstant)
             {
-                if (leftChainRequirements.HasFlag(FieldChainRequirements.EndsInToOne) && !(rightTerm is NullConstantExpression))
-                {
-                    // Run another pass over left chain to have it fail when chain ends in relationship.
-                    OnResolveFieldChain(leftChain.ToString(), FieldChainRequirements.EndsInAttribute);
-                }
-
-                PropertyInfo leftProperty = leftChain.Fields.Last().Property;
-
-                if (leftProperty.Name == nameof(Identifiable.Id) && rightTerm is LiteralConstantExpression rightConstant)
-                {
-                    string id = DeObfuscateStringId(leftProperty.ReflectedType, rightConstant.Value);
-                    rightTerm = new LiteralConstantExpression(id);
-                }
+                string id = DeObfuscateStringId(leftProperty.ReflectedType!, rightConstant.Value);
+                rightTerm = new LiteralConstantExpression(id);
             }
-
-            return new ComparisonExpression(comparisonOperator, leftTerm, rightTerm);
         }
 
-        protected MatchTextExpression ParseTextMatch(string matchFunctionName)
+        return new ComparisonExpression(comparisonOperator, leftTerm, rightTerm);
+    }
+
+    protected MatchTextExpression ParseTextMatch(string matchFunctionName)
+    {
+        EatText(matchFunctionName);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        ResourceFieldChainExpression targetAttribute = ParseFieldChain(FieldChainRequirements.EndsInAttribute, null);
+
+        EatSingleCharacterToken(TokenKind.Comma);
+
+        LiteralConstantExpression constant = ParseConstant();
+
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        var matchKind = Enum.Parse<TextMatchKind>(matchFunctionName.Pascalize());
+        return new MatchTextExpression(targetAttribute, constant, matchKind);
+    }
+
+    protected AnyExpression ParseAny()
+    {
+        EatText(Keywords.Any);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        ResourceFieldChainExpression targetAttribute = ParseFieldChain(FieldChainRequirements.EndsInAttribute, null);
+
+        EatSingleCharacterToken(TokenKind.Comma);
+
+        ImmutableHashSet<LiteralConstantExpression>.Builder constantsBuilder = ImmutableHashSet.CreateBuilder<LiteralConstantExpression>();
+
+        LiteralConstantExpression constant = ParseConstant();
+        constantsBuilder.Add(constant);
+
+        EatSingleCharacterToken(TokenKind.Comma);
+
+        constant = ParseConstant();
+        constantsBuilder.Add(constant);
+
+        while (TokenStack.TryPeek(out Token? nextToken) && nextToken.Kind == TokenKind.Comma)
         {
-            EatText(matchFunctionName);
-            EatSingleCharacterToken(TokenKind.OpenParen);
-
-            ResourceFieldChainExpression targetAttribute = ParseFieldChain(FieldChainRequirements.EndsInAttribute, null);
-
-            EatSingleCharacterToken(TokenKind.Comma);
-
-            LiteralConstantExpression constant = ParseConstant();
-
-            EatSingleCharacterToken(TokenKind.CloseParen);
-
-            var matchKind = Enum.Parse<TextMatchKind>(matchFunctionName.Pascalize());
-            return new MatchTextExpression(targetAttribute, constant, matchKind);
-        }
-
-        protected EqualsAnyOfExpression ParseAny()
-        {
-            EatText(Keywords.Any);
-            EatSingleCharacterToken(TokenKind.OpenParen);
-
-            ResourceFieldChainExpression targetAttribute = ParseFieldChain(FieldChainRequirements.EndsInAttribute, null);
-
-            EatSingleCharacterToken(TokenKind.Comma);
-
-            var constants = new List<LiteralConstantExpression>();
-
-            LiteralConstantExpression constant = ParseConstant();
-            constants.Add(constant);
-
             EatSingleCharacterToken(TokenKind.Comma);
 
             constant = ParseConstant();
-            constants.Add(constant);
-
-            while (TokenStack.TryPeek(out Token nextToken) && nextToken.Kind == TokenKind.Comma)
-            {
-                EatSingleCharacterToken(TokenKind.Comma);
-
-                constant = ParseConstant();
-                constants.Add(constant);
-            }
-
-            EatSingleCharacterToken(TokenKind.CloseParen);
-
-            PropertyInfo targetAttributeProperty = targetAttribute.Fields.Last().Property;
-
-            if (targetAttributeProperty.Name == nameof(Identifiable.Id))
-            {
-                for (int index = 0; index < constants.Count; index++)
-                {
-                    string stringId = constants[index].Value;
-                    string id = DeObfuscateStringId(targetAttributeProperty.ReflectedType, stringId);
-                    constants[index] = new LiteralConstantExpression(id);
-                }
-            }
-
-            return new EqualsAnyOfExpression(targetAttribute, constants);
+            constantsBuilder.Add(constant);
         }
 
-        protected CollectionNotEmptyExpression ParseHas()
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        IImmutableSet<LiteralConstantExpression> constantSet = constantsBuilder.ToImmutable();
+
+        PropertyInfo targetAttributeProperty = targetAttribute.Fields[^1].Property;
+
+        if (targetAttributeProperty.Name == nameof(Identifiable<object>.Id))
         {
-            EatText(Keywords.Has);
-            EatSingleCharacterToken(TokenKind.OpenParen);
-
-            ResourceFieldChainExpression targetCollection = ParseFieldChain(FieldChainRequirements.EndsInToMany, null);
-            FilterExpression filter = null;
-
-            if (TokenStack.TryPeek(out Token nextToken) && nextToken.Kind == TokenKind.Comma)
-            {
-                EatSingleCharacterToken(TokenKind.Comma);
-
-                filter = ParseFilterInHas((HasManyAttribute)targetCollection.Fields.Last());
-            }
-
-            EatSingleCharacterToken(TokenKind.CloseParen);
-
-            return new CollectionNotEmptyExpression(targetCollection, filter);
+            constantSet = DeObfuscateIdConstants(constantSet, targetAttributeProperty);
         }
 
-        private FilterExpression ParseFilterInHas(HasManyAttribute hasManyRelationship)
+        return new AnyExpression(targetAttribute, constantSet);
+    }
+
+    private IImmutableSet<LiteralConstantExpression> DeObfuscateIdConstants(IImmutableSet<LiteralConstantExpression> constantSet,
+        PropertyInfo targetAttributeProperty)
+    {
+        ImmutableHashSet<LiteralConstantExpression>.Builder idConstantsBuilder = ImmutableHashSet.CreateBuilder<LiteralConstantExpression>();
+
+        foreach (LiteralConstantExpression idConstant in constantSet)
         {
-            ResourceContext outerScopeBackup = _resourceContextInScope;
+            string stringId = idConstant.Value;
+            string id = DeObfuscateStringId(targetAttributeProperty.ReflectedType!, stringId);
 
-            Type innerResourceType = hasManyRelationship.RightType;
-            _resourceContextInScope = _resourceContextProvider.GetResourceContext(innerResourceType);
-
-            FilterExpression filter = ParseFilter();
-
-            _resourceContextInScope = outerScopeBackup;
-            return filter;
+            idConstantsBuilder.Add(new LiteralConstantExpression(id));
         }
 
-        protected QueryExpression ParseCountOrField(FieldChainRequirements chainRequirements)
+        return idConstantsBuilder.ToImmutable();
+    }
+
+    protected HasExpression ParseHas()
+    {
+        EatText(Keywords.Has);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        ResourceFieldChainExpression targetCollection = ParseFieldChain(FieldChainRequirements.EndsInToMany, null);
+        FilterExpression? filter = null;
+
+        if (TokenStack.TryPeek(out Token? nextToken) && nextToken.Kind == TokenKind.Comma)
         {
-            CountExpression count = TryParseCount();
+            EatSingleCharacterToken(TokenKind.Comma);
 
-            if (count != null)
-            {
-                return count;
-            }
-
-            return ParseFieldChain(chainRequirements, "Count function or field name expected.");
+            filter = ParseFilterInHas((HasManyAttribute)targetCollection.Fields[^1]);
         }
 
-        protected QueryExpression ParseCountOrConstantOrNullOrField(FieldChainRequirements chainRequirements)
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        return new HasExpression(targetCollection, filter);
+    }
+
+    private FilterExpression ParseFilterInHas(HasManyAttribute hasManyRelationship)
+    {
+        return InScopeOfResourceType(hasManyRelationship.RightType, ParseFilter);
+    }
+
+    private IsTypeExpression ParseIsType()
+    {
+        EatText(Keywords.IsType);
+        EatSingleCharacterToken(TokenKind.OpenParen);
+
+        ResourceFieldChainExpression? targetToOneRelationship = TryParseToOneRelationshipChain();
+
+        EatSingleCharacterToken(TokenKind.Comma);
+
+        ResourceType baseType = targetToOneRelationship != null ? ((RelationshipAttribute)targetToOneRelationship.Fields[^1]).RightType : _resourceTypeInScope!;
+        ResourceType derivedType = ParseDerivedType(baseType);
+
+        FilterExpression? child = TryParseFilterInIsType(derivedType);
+
+        EatSingleCharacterToken(TokenKind.CloseParen);
+
+        return new IsTypeExpression(targetToOneRelationship, derivedType, child);
+    }
+
+    private ResourceFieldChainExpression? TryParseToOneRelationshipChain()
+    {
+        if (TokenStack.TryPeek(out Token? nextToken) && nextToken.Kind == TokenKind.Comma)
         {
-            CountExpression count = TryParseCount();
-
-            if (count != null)
-            {
-                return count;
-            }
-
-            IdentifierExpression constantOrNull = TryParseConstantOrNull();
-
-            if (constantOrNull != null)
-            {
-                return constantOrNull;
-            }
-
-            return ParseFieldChain(chainRequirements, "Count function, value between quotes, null or field name expected.");
-        }
-
-        protected IdentifierExpression TryParseConstantOrNull()
-        {
-            if (TokenStack.TryPeek(out Token nextToken))
-            {
-                if (nextToken.Kind == TokenKind.Text && nextToken.Value == Keywords.Null)
-                {
-                    TokenStack.Pop();
-                    return new NullConstantExpression();
-                }
-
-                if (nextToken.Kind == TokenKind.QuotedText)
-                {
-                    TokenStack.Pop();
-                    return new LiteralConstantExpression(nextToken.Value);
-                }
-            }
-
             return null;
         }
 
-        protected LiteralConstantExpression ParseConstant()
-        {
-            if (TokenStack.TryPop(out Token token) && token.Kind == TokenKind.QuotedText)
-            {
-                return new LiteralConstantExpression(token.Value);
-            }
+        return ParseFieldChain(FieldChainRequirements.EndsInToOne, "Relationship name or , expected.");
+    }
 
-            throw new QueryParseException("Value between quotes expected.");
+    private ResourceType ParseDerivedType(ResourceType baseType)
+    {
+        if (TokenStack.TryPop(out Token? token) && token.Kind == TokenKind.Text)
+        {
+            string derivedTypeName = token.Value!;
+            return ResolveDerivedType(baseType, derivedTypeName);
         }
 
-        private string DeObfuscateStringId(Type resourceType, string stringId)
+        throw new QueryParseException("Resource type expected.");
+    }
+
+    private ResourceType ResolveDerivedType(ResourceType baseType, string derivedTypeName)
+    {
+        ResourceType? derivedType = GetDerivedType(baseType, derivedTypeName);
+
+        if (derivedType == null)
         {
-            IIdentifiable tempResource = _resourceFactory.CreateInstance(resourceType);
-            tempResource.StringId = stringId;
-            return tempResource.GetTypedId().ToString();
+            throw new QueryParseException($"Resource type '{derivedTypeName}' does not exist or does not derive from '{baseType.PublicName}'.");
         }
 
-        protected override IReadOnlyCollection<ResourceFieldAttribute> OnResolveFieldChain(string path, FieldChainRequirements chainRequirements)
+        return derivedType;
+    }
+
+    private ResourceType? GetDerivedType(ResourceType baseType, string publicName)
+    {
+        foreach (ResourceType derivedType in baseType.DirectlyDerivedTypes)
         {
-            if (chainRequirements == FieldChainRequirements.EndsInToMany)
+            if (derivedType.PublicName == publicName)
             {
-                return ChainResolver.ResolveToOneChainEndingInToMany(_resourceContextInScope, path, _validateSingleFieldCallback);
+                return derivedType;
             }
 
-            if (chainRequirements == FieldChainRequirements.EndsInAttribute)
+            ResourceType? nextType = GetDerivedType(derivedType, publicName);
+
+            if (nextType != null)
             {
-                return ChainResolver.ResolveToOneChainEndingInAttribute(_resourceContextInScope, path, _validateSingleFieldCallback);
+                return nextType;
+            }
+        }
+
+        return null;
+    }
+
+    private FilterExpression? TryParseFilterInIsType(ResourceType derivedType)
+    {
+        FilterExpression? filter = null;
+
+        if (TokenStack.TryPeek(out Token? nextToken) && nextToken.Kind == TokenKind.Comma)
+        {
+            EatSingleCharacterToken(TokenKind.Comma);
+
+            filter = InScopeOfResourceType(derivedType, ParseFilter);
+        }
+
+        return filter;
+    }
+
+    protected QueryExpression ParseCountOrField(FieldChainRequirements chainRequirements)
+    {
+        CountExpression? count = TryParseCount();
+
+        if (count != null)
+        {
+            return count;
+        }
+
+        return ParseFieldChain(chainRequirements, "Count function or field name expected.");
+    }
+
+    protected QueryExpression ParseCountOrConstantOrNullOrField(FieldChainRequirements chainRequirements)
+    {
+        CountExpression? count = TryParseCount();
+
+        if (count != null)
+        {
+            return count;
+        }
+
+        IdentifierExpression? constantOrNull = TryParseConstantOrNull();
+
+        if (constantOrNull != null)
+        {
+            return constantOrNull;
+        }
+
+        return ParseFieldChain(chainRequirements, "Count function, value between quotes, null or field name expected.");
+    }
+
+    protected IdentifierExpression? TryParseConstantOrNull()
+    {
+        if (TokenStack.TryPeek(out Token? nextToken))
+        {
+            if (nextToken.Kind == TokenKind.Text && nextToken.Value == Keywords.Null)
+            {
+                TokenStack.Pop();
+                return NullConstantExpression.Instance;
             }
 
-            if (chainRequirements.HasFlag(FieldChainRequirements.EndsInAttribute) && chainRequirements.HasFlag(FieldChainRequirements.EndsInToOne))
+            if (nextToken.Kind == TokenKind.QuotedText)
             {
-                return ChainResolver.ResolveToOneChainEndingInAttributeOrToOne(_resourceContextInScope, path, _validateSingleFieldCallback);
+                TokenStack.Pop();
+                return new LiteralConstantExpression(nextToken.Value!);
             }
+        }
 
-            throw new InvalidOperationException($"Unexpected combination of chain requirement flags '{chainRequirements}'.");
+        return null;
+    }
+
+    protected LiteralConstantExpression ParseConstant()
+    {
+        if (TokenStack.TryPop(out Token? token) && token.Kind == TokenKind.QuotedText)
+        {
+            return new LiteralConstantExpression(token.Value!);
+        }
+
+        throw new QueryParseException("Value between quotes expected.");
+    }
+
+    private string DeObfuscateStringId(Type resourceClrType, string stringId)
+    {
+        IIdentifiable tempResource = _resourceFactory.CreateInstance(resourceClrType);
+        tempResource.StringId = stringId;
+        return tempResource.GetTypedId().ToString()!;
+    }
+
+    protected override IImmutableList<ResourceFieldAttribute> OnResolveFieldChain(string path, FieldChainRequirements chainRequirements)
+    {
+        if (chainRequirements == FieldChainRequirements.EndsInToMany)
+        {
+            return ChainResolver.ResolveToOneChainEndingInToMany(_resourceTypeInScope!, path, FieldChainInheritanceRequirement.Disabled,
+                _validateSingleFieldCallback);
+        }
+
+        if (chainRequirements == FieldChainRequirements.EndsInAttribute)
+        {
+            return ChainResolver.ResolveToOneChainEndingInAttribute(_resourceTypeInScope!, path, FieldChainInheritanceRequirement.Disabled,
+                _validateSingleFieldCallback);
+        }
+
+        if (chainRequirements == FieldChainRequirements.EndsInToOne)
+        {
+            return ChainResolver.ResolveToOneChain(_resourceTypeInScope!, path, _validateSingleFieldCallback);
+        }
+
+        if (chainRequirements.HasFlag(FieldChainRequirements.EndsInAttribute) && chainRequirements.HasFlag(FieldChainRequirements.EndsInToOne))
+        {
+            return ChainResolver.ResolveToOneChainEndingInAttributeOrToOne(_resourceTypeInScope!, path, _validateSingleFieldCallback);
+        }
+
+        throw new InvalidOperationException($"Unexpected combination of chain requirement flags '{chainRequirements}'.");
+    }
+
+    private TResult InScopeOfResourceType<TResult>(ResourceType resourceType, Func<TResult> action)
+    {
+        ResourceType? backupType = _resourceTypeInScope;
+
+        try
+        {
+            _resourceTypeInScope = resourceType;
+            return action();
+        }
+        finally
+        {
+            _resourceTypeInScope = backupType;
         }
     }
 }

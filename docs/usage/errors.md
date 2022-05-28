@@ -1,26 +1,26 @@
 # Errors
 
-Errors returned will contain only the properties that are set on the `Error` class. Custom fields can be added through `Error.Meta`.
-You can create a custom error by throwing a `JsonApiException` (which accepts an `Error` instance), or returning an `Error` instance from an `ActionResult` in a controller.
-Please keep in mind that JSON:API requires Title to be a generic message, while Detail should contain information about the specific problem occurence.
+Errors returned will contain only the properties that are set on the `ErrorObject` class. Custom fields can be added through `ErrorObject.Meta`.
+You can create a custom error by throwing a `JsonApiException` (which accepts an `ErrorObject` instance), or returning an `ErrorObject` instance from an `ActionResult` in a controller.
+Please keep in mind that JSON:API requires `Title` to be a generic message, while `Detail` should contain information about the specific problem occurence.
 
 From a controller method:
 
 ```c#
-return Conflict(new Error(HttpStatusCode.Conflict)
+return Conflict(new ErrorObject(HttpStatusCode.Conflict)
 {
     Title = "Target resource was modified by another user.",
-    Detail = $"User {userName} changed the {resourceField} field on the {resourceName} resource."
+    Detail = $"User {userName} changed the {resourceField} field on {resourceName} resource."
 });
 ```
 
 From other code:
 
 ```c#
-throw new JsonApiException(new Error(HttpStatusCode.Conflict)
+throw new JsonApiException(new ErrorObject(HttpStatusCode.Conflict)
 {
     Title = "Target resource was modified by another user.",
-    Detail = $"User {userName} changed the {resourceField} field on the {resourceName} resource."
+    Detail = $"User {userName} changed the {resourceField} field on {resourceName} resource."
 });
 ```
 
@@ -69,26 +69,25 @@ public class CustomExceptionHandler : ExceptionHandler
         return base.GetLogMessage(exception);
     }
 
-    protected override ErrorDocument CreateErrorDocument(Exception exception)
+    protected override IReadOnlyList<ErrorObject> CreateErrorResponse(Exception exception)
     {
         if (exception is ProductOutOfStockException productOutOfStock)
         {
-            return new ErrorDocument(new Error(HttpStatusCode.Conflict)
+            return new[]
             {
-                Title = "Product is temporarily available.",
-                Detail = $"Product {productOutOfStock.ProductId} cannot be ordered at the moment."
-            });
+                new ErrorObject(HttpStatusCode.Conflict)
+                {
+                    Title = "Product is temporarily available.",
+                    Detail = $"Product {productOutOfStock.ProductId} " +
+                        "cannot be ordered at the moment."
+                }
+            };
         }
 
-        return base.CreateErrorDocument(exception);
+        return base.CreateErrorResponse(exception);
     }
 }
 
-public class Startup
-{
-    public void ConfigureServices(IServiceCollection services)
-    {
-        services.AddScoped<IExceptionHandler, CustomExceptionHandler>();
-    }
-}
+// Program.cs
+builder.Services.AddScoped<IExceptionHandler, CustomExceptionHandler>();
 ```

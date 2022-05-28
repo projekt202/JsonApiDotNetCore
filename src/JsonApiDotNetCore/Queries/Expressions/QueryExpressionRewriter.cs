@@ -1,319 +1,304 @@
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
 using JetBrains.Annotations;
 using JsonApiDotNetCore.Configuration;
 
-namespace JsonApiDotNetCore.Queries.Expressions
+namespace JsonApiDotNetCore.Queries.Expressions;
+
+/// <summary>
+/// Building block for rewriting <see cref="QueryExpression" /> trees. It walks through nested expressions and updates parent on changes.
+/// </summary>
+[PublicAPI]
+public class QueryExpressionRewriter<TArgument> : QueryExpressionVisitor<TArgument, QueryExpression?>
 {
-    /// <summary>
-    /// Building block for rewriting <see cref="QueryExpression" /> trees. It walks through nested expressions and updates parent on changes.
-    /// </summary>
-    [PublicAPI]
-    public class QueryExpressionRewriter<TArgument> : QueryExpressionVisitor<TArgument, QueryExpression>
+    public override QueryExpression? Visit(QueryExpression expression, TArgument argument)
     {
-        public override QueryExpression Visit(QueryExpression expression, TArgument argument)
+        return expression.Accept(this, argument);
+    }
+
+    public override QueryExpression DefaultVisit(QueryExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    public override QueryExpression? VisitComparison(ComparisonExpression expression, TArgument argument)
+    {
+        QueryExpression? newLeft = Visit(expression.Left, argument);
+        QueryExpression? newRight = Visit(expression.Right, argument);
+
+        if (newLeft != null && newRight != null)
         {
-            return expression.Accept(this, argument);
-        }
-
-        public override QueryExpression DefaultVisit(QueryExpression expression, TArgument argument)
-        {
-            return expression;
-        }
-
-        public override QueryExpression VisitComparison(ComparisonExpression expression, TArgument argument)
-        {
-            if (expression == null)
-            {
-                return null;
-            }
-
-            QueryExpression newLeft = Visit(expression.Left, argument);
-            QueryExpression newRight = Visit(expression.Right, argument);
-
             var newExpression = new ComparisonExpression(expression.Operator, newLeft, newRight);
             return newExpression.Equals(expression) ? expression : newExpression;
         }
 
-        public override QueryExpression VisitResourceFieldChain(ResourceFieldChainExpression expression, TArgument argument)
+        return null;
+    }
+
+    public override QueryExpression? VisitResourceFieldChain(ResourceFieldChainExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    public override QueryExpression VisitLiteralConstant(LiteralConstantExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    public override QueryExpression VisitNullConstant(NullConstantExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    public override QueryExpression? VisitLogical(LogicalExpression expression, TArgument argument)
+    {
+        IImmutableList<FilterExpression> newTerms = VisitList(expression.Terms, argument);
+
+        if (newTerms.Count == 1)
         {
-            return expression;
+            return newTerms[0];
         }
 
-        public override QueryExpression VisitLiteralConstant(LiteralConstantExpression expression, TArgument argument)
+        if (newTerms.Count != 0)
         {
-            return expression;
+            var newExpression = new LogicalExpression(expression.Operator, newTerms);
+            return newExpression.Equals(expression) ? expression : newExpression;
         }
 
-        public override QueryExpression VisitNullConstant(NullConstantExpression expression, TArgument argument)
+        return null;
+    }
+
+    public override QueryExpression? VisitNot(NotExpression expression, TArgument argument)
+    {
+        if (Visit(expression.Child, argument) is FilterExpression newChild)
         {
-            return expression;
+            var newExpression = new NotExpression(newChild);
+            return newExpression.Equals(expression) ? expression : newExpression;
         }
 
-        public override QueryExpression VisitLogical(LogicalExpression expression, TArgument argument)
+        return null;
+    }
+
+    public override QueryExpression? VisitHas(HasExpression expression, TArgument argument)
+    {
+        if (Visit(expression.TargetCollection, argument) is ResourceFieldChainExpression newTargetCollection)
         {
-            if (expression != null)
+            FilterExpression? newFilter = expression.Filter != null ? Visit(expression.Filter, argument) as FilterExpression : null;
+
+            var newExpression = new HasExpression(newTargetCollection, newFilter);
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression VisitIsType(IsTypeExpression expression, TArgument argument)
+    {
+        ResourceFieldChainExpression? newTargetToOneRelationship = expression.TargetToOneRelationship != null
+            ? Visit(expression.TargetToOneRelationship, argument) as ResourceFieldChainExpression
+            : null;
+
+        FilterExpression? newChild = expression.Child != null ? Visit(expression.Child, argument) as FilterExpression : null;
+
+        var newExpression = new IsTypeExpression(newTargetToOneRelationship, expression.DerivedType, newChild);
+        return newExpression.Equals(expression) ? expression : newExpression;
+    }
+
+    public override QueryExpression? VisitSortElement(SortElementExpression expression, TArgument argument)
+    {
+        SortElementExpression? newExpression = null;
+
+        if (expression.Count != null)
+        {
+            if (Visit(expression.Count, argument) is CountExpression newCount)
             {
-                IReadOnlyCollection<FilterExpression> newTerms = VisitSequence(expression.Terms, argument);
-
-                if (newTerms.Count == 1)
-                {
-                    return newTerms.First();
-                }
-
-                if (newTerms.Count != 0)
-                {
-                    var newExpression = new LogicalExpression(expression.Operator, newTerms);
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
+                newExpression = new SortElementExpression(newCount, expression.IsAscending);
             }
-
-            return null;
         }
-
-        public override QueryExpression VisitNot(NotExpression expression, TArgument argument)
+        else if (expression.TargetAttribute != null)
         {
-            if (expression != null)
+            if (Visit(expression.TargetAttribute, argument) is ResourceFieldChainExpression newTargetAttribute)
             {
-                if (Visit(expression.Child, argument) is FilterExpression newChild)
-                {
-                    var newExpression = new NotExpression(newChild);
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
+                newExpression = new SortElementExpression(newTargetAttribute, expression.IsAscending);
             }
-
-            return null;
         }
 
-        public override QueryExpression VisitCollectionNotEmpty(CollectionNotEmptyExpression expression, TArgument argument)
+        if (newExpression != null)
         {
-            if (expression != null)
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression? VisitSort(SortExpression expression, TArgument argument)
+    {
+        IImmutableList<SortElementExpression> newElements = VisitList(expression.Elements, argument);
+
+        if (newElements.Count != 0)
+        {
+            var newExpression = new SortExpression(newElements);
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression VisitPagination(PaginationExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    public override QueryExpression? VisitCount(CountExpression expression, TArgument argument)
+    {
+        if (Visit(expression.TargetCollection, argument) is ResourceFieldChainExpression newTargetCollection)
+        {
+            var newExpression = new CountExpression(newTargetCollection);
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression? VisitMatchText(MatchTextExpression expression, TArgument argument)
+    {
+        var newTargetAttribute = Visit(expression.TargetAttribute, argument) as ResourceFieldChainExpression;
+        var newTextValue = Visit(expression.TextValue, argument) as LiteralConstantExpression;
+
+        if (newTargetAttribute != null && newTextValue != null)
+        {
+            var newExpression = new MatchTextExpression(newTargetAttribute, newTextValue, expression.MatchKind);
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression? VisitAny(AnyExpression expression, TArgument argument)
+    {
+        var newTargetAttribute = Visit(expression.TargetAttribute, argument) as ResourceFieldChainExpression;
+        IImmutableSet<LiteralConstantExpression> newConstants = VisitSet(expression.Constants, argument);
+
+        if (newTargetAttribute != null)
+        {
+            var newExpression = new AnyExpression(newTargetAttribute, newConstants);
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression? VisitSparseFieldTable(SparseFieldTableExpression expression, TArgument argument)
+    {
+        ImmutableDictionary<ResourceType, SparseFieldSetExpression>.Builder newTable =
+            ImmutableDictionary.CreateBuilder<ResourceType, SparseFieldSetExpression>();
+
+        foreach ((ResourceType resourceType, SparseFieldSetExpression sparseFieldSet) in expression.Table)
+        {
+            if (Visit(sparseFieldSet, argument) is SparseFieldSetExpression newSparseFieldSet)
             {
-                if (Visit(expression.TargetCollection, argument) is ResourceFieldChainExpression newTargetCollection)
-                {
-                    FilterExpression newFilter = expression.Filter != null ? Visit(expression.Filter, argument) as FilterExpression : null;
-
-                    var newExpression = new CollectionNotEmptyExpression(newTargetCollection, newFilter);
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
+                newTable[resourceType] = newSparseFieldSet;
             }
-
-            return null;
         }
 
-        public override QueryExpression VisitSortElement(SortElementExpression expression, TArgument argument)
+        if (newTable.Count > 0)
         {
-            if (expression != null)
+            var newExpression = new SparseFieldTableExpression(newTable.ToImmutable());
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression VisitSparseFieldSet(SparseFieldSetExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    public override QueryExpression? VisitQueryStringParameterScope(QueryStringParameterScopeExpression expression, TArgument argument)
+    {
+        var newParameterName = Visit(expression.ParameterName, argument) as LiteralConstantExpression;
+        ResourceFieldChainExpression? newScope = expression.Scope != null ? Visit(expression.Scope, argument) as ResourceFieldChainExpression : null;
+
+        if (newParameterName != null)
+        {
+            var newExpression = new QueryStringParameterScopeExpression(newParameterName, newScope);
+            return newExpression.Equals(expression) ? expression : newExpression;
+        }
+
+        return null;
+    }
+
+    public override QueryExpression PaginationQueryStringValue(PaginationQueryStringValueExpression expression, TArgument argument)
+    {
+        IImmutableList<PaginationElementQueryStringValueExpression> newElements = VisitList(expression.Elements, argument);
+
+        var newExpression = new PaginationQueryStringValueExpression(newElements);
+        return newExpression.Equals(expression) ? expression : newExpression;
+    }
+
+    public override QueryExpression PaginationElementQueryStringValue(PaginationElementQueryStringValueExpression expression, TArgument argument)
+    {
+        ResourceFieldChainExpression? newScope = expression.Scope != null ? Visit(expression.Scope, argument) as ResourceFieldChainExpression : null;
+
+        var newExpression = new PaginationElementQueryStringValueExpression(newScope, expression.Value);
+        return newExpression.Equals(expression) ? expression : newExpression;
+    }
+
+    public override QueryExpression VisitInclude(IncludeExpression expression, TArgument argument)
+    {
+        IImmutableSet<IncludeElementExpression> newElements = VisitSet(expression.Elements, argument);
+
+        if (newElements.Count == 0)
+        {
+            return IncludeExpression.Empty;
+        }
+
+        var newExpression = new IncludeExpression(newElements);
+        return newExpression.Equals(expression) ? expression : newExpression;
+    }
+
+    public override QueryExpression VisitIncludeElement(IncludeElementExpression expression, TArgument argument)
+    {
+        IImmutableSet<IncludeElementExpression> newElements = VisitSet(expression.Children, argument);
+
+        var newExpression = new IncludeElementExpression(expression.Relationship, newElements);
+        return newExpression.Equals(expression) ? expression : newExpression;
+    }
+
+    public override QueryExpression VisitQueryableHandler(QueryableHandlerExpression expression, TArgument argument)
+    {
+        return expression;
+    }
+
+    protected virtual IImmutableList<TExpression> VisitList<TExpression>(IImmutableList<TExpression> elements, TArgument argument)
+        where TExpression : QueryExpression
+    {
+        ImmutableArray<TExpression>.Builder arrayBuilder = ImmutableArray.CreateBuilder<TExpression>(elements.Count);
+
+        foreach (TExpression element in elements)
+        {
+            if (Visit(element, argument) is TExpression newElement)
             {
-                SortElementExpression newExpression = null;
-
-                if (expression.Count != null)
-                {
-                    if (Visit(expression.Count, argument) is CountExpression newCount)
-                    {
-                        newExpression = new SortElementExpression(newCount, expression.IsAscending);
-                    }
-                }
-                else if (expression.TargetAttribute != null)
-                {
-                    if (Visit(expression.TargetAttribute, argument) is ResourceFieldChainExpression newTargetAttribute)
-                    {
-                        newExpression = new SortElementExpression(newTargetAttribute, expression.IsAscending);
-                    }
-                }
-
-                if (newExpression != null)
-                {
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
+                arrayBuilder.Add(newElement);
             }
-
-            return null;
         }
 
-        public override QueryExpression VisitSort(SortExpression expression, TArgument argument)
+        return arrayBuilder.ToImmutable();
+    }
+
+    protected virtual IImmutableSet<TExpression> VisitSet<TExpression>(IImmutableSet<TExpression> elements, TArgument argument)
+        where TExpression : QueryExpression
+    {
+        ImmutableHashSet<TExpression>.Builder setBuilder = ImmutableHashSet.CreateBuilder<TExpression>();
+
+        foreach (TExpression element in elements)
         {
-            if (expression != null)
+            if (Visit(element, argument) is TExpression newElement)
             {
-                IReadOnlyCollection<SortElementExpression> newElements = VisitSequence(expression.Elements, argument);
-
-                if (newElements.Count != 0)
-                {
-                    var newExpression = new SortExpression(newElements);
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
+                setBuilder.Add(newElement);
             }
-
-            return null;
         }
 
-        public override QueryExpression VisitPagination(PaginationExpression expression, TArgument argument)
-        {
-            return expression;
-        }
-
-        public override QueryExpression VisitCount(CountExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                if (Visit(expression.TargetCollection, argument) is ResourceFieldChainExpression newTargetCollection)
-                {
-                    var newExpression = new CountExpression(newTargetCollection);
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitMatchText(MatchTextExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                var newTargetAttribute = Visit(expression.TargetAttribute, argument) as ResourceFieldChainExpression;
-                var newTextValue = Visit(expression.TextValue, argument) as LiteralConstantExpression;
-
-                var newExpression = new MatchTextExpression(newTargetAttribute, newTextValue, expression.MatchKind);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitEqualsAnyOf(EqualsAnyOfExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                var newTargetAttribute = Visit(expression.TargetAttribute, argument) as ResourceFieldChainExpression;
-                IReadOnlyCollection<LiteralConstantExpression> newConstants = VisitSequence(expression.Constants, argument);
-
-                var newExpression = new EqualsAnyOfExpression(newTargetAttribute, newConstants);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitSparseFieldTable(SparseFieldTableExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                var newTable = new Dictionary<ResourceContext, SparseFieldSetExpression>();
-
-                foreach ((ResourceContext resourceContext, SparseFieldSetExpression sparseFieldSet) in expression.Table)
-                {
-                    if (Visit(sparseFieldSet, argument) is SparseFieldSetExpression newSparseFieldSet)
-                    {
-                        newTable[resourceContext] = newSparseFieldSet;
-                    }
-                }
-
-                if (newTable.Count > 0)
-                {
-                    var newExpression = new SparseFieldTableExpression(newTable);
-                    return newExpression.Equals(expression) ? expression : newExpression;
-                }
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitSparseFieldSet(SparseFieldSetExpression expression, TArgument argument)
-        {
-            return expression;
-        }
-
-        public override QueryExpression VisitQueryStringParameterScope(QueryStringParameterScopeExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                var newParameterName = Visit(expression.ParameterName, argument) as LiteralConstantExpression;
-
-                ResourceFieldChainExpression newScope = expression.Scope != null ? Visit(expression.Scope, argument) as ResourceFieldChainExpression : null;
-
-                var newExpression = new QueryStringParameterScopeExpression(newParameterName, newScope);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression PaginationQueryStringValue(PaginationQueryStringValueExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                IReadOnlyCollection<PaginationElementQueryStringValueExpression> newElements = VisitSequence(expression.Elements, argument);
-
-                var newExpression = new PaginationQueryStringValueExpression(newElements);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression PaginationElementQueryStringValue(PaginationElementQueryStringValueExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                ResourceFieldChainExpression newScope = expression.Scope != null ? Visit(expression.Scope, argument) as ResourceFieldChainExpression : null;
-
-                var newExpression = new PaginationElementQueryStringValueExpression(newScope, expression.Value);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitInclude(IncludeExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                IReadOnlyCollection<IncludeElementExpression> newElements = VisitSequence(expression.Elements, argument);
-
-                if (newElements.Count == 0)
-                {
-                    return IncludeExpression.Empty;
-                }
-
-                var newExpression = new IncludeExpression(newElements);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitIncludeElement(IncludeElementExpression expression, TArgument argument)
-        {
-            if (expression != null)
-            {
-                IReadOnlyCollection<IncludeElementExpression> newElements = VisitSequence(expression.Children, argument);
-
-                var newExpression = new IncludeElementExpression(expression.Relationship, newElements);
-                return newExpression.Equals(expression) ? expression : newExpression;
-            }
-
-            return null;
-        }
-
-        public override QueryExpression VisitQueryableHandler(QueryableHandlerExpression expression, TArgument argument)
-        {
-            return expression;
-        }
-
-        protected virtual IReadOnlyCollection<TExpression> VisitSequence<TExpression>(IEnumerable<TExpression> elements, TArgument argument)
-            where TExpression : QueryExpression
-        {
-            var newElements = new List<TExpression>();
-
-            foreach (TExpression element in elements)
-            {
-                if (Visit(element, argument) is TExpression newElement)
-                {
-                    newElements.Add(newElement);
-                }
-            }
-
-            return newElements;
-        }
+        return setBuilder.ToImmutable();
     }
 }
