@@ -93,29 +93,29 @@ public class ResourceRepositoryAccessor : IResourceRepositoryAccessor
     }
 
     /// <inheritdoc />
-    public async Task SetRelationshipAsync<TResource>(TResource leftResource, object? rightValue, CancellationToken cancellationToken)
+    public async Task SetRelationshipAsync<TResource>(TResource leftResource, string relationshipName, object? rightValue, CancellationToken cancellationToken)
         where TResource : class, IIdentifiable
     {
         dynamic repository = GetWriteRepository(typeof(TResource));
-        await repository.SetRelationshipAsync(leftResource, rightValue, cancellationToken);
+        await repository.SetRelationshipAsync(leftResource, relationshipName, rightValue, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task AddToToManyRelationshipAsync<TResource, TId>(TResource? leftResource, TId leftId, ISet<IIdentifiable> rightResourceIds,
+    public async Task AddToToManyRelationshipAsync<TResource, TId>(TResource? leftResource, TId leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds, 
         CancellationToken cancellationToken)
         where TResource : class, IIdentifiable<TId>
     {
         dynamic repository = GetWriteRepository(typeof(TResource));
-        await repository.AddToToManyRelationshipAsync(leftResource, leftId, rightResourceIds, cancellationToken);
+        await repository.AddToToManyRelationshipAsync(leftResource, leftId, relationshipName, rightResourceIds, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task RemoveFromToManyRelationshipAsync<TResource>(TResource leftResource, ISet<IIdentifiable> rightResourceIds,
+    public async Task RemoveFromToManyRelationshipAsync<TResource>(TResource leftResource, string relationshipName, ISet<IIdentifiable> rightResourceIds, 
         CancellationToken cancellationToken)
         where TResource : class, IIdentifiable
     {
         dynamic repository = GetWriteRepository(typeof(TResource));
-        await repository.RemoveFromToManyRelationshipAsync(leftResource, rightResourceIds, cancellationToken);
+        await repository.RemoveFromToManyRelationshipAsync(leftResource, relationshipName, rightResourceIds, cancellationToken);
     }
 
     protected object ResolveReadRepository(Type resourceClrType)

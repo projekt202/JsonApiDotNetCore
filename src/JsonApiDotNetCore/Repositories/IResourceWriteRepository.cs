@@ -48,15 +48,15 @@ public interface IResourceWriteRepository<TResource, in TId>
     /// <summary>
     /// Performs a complete replacement of the relationship in the underlying data store.
     /// </summary>
-    Task SetRelationshipAsync(TResource leftResource, object? rightValue, CancellationToken cancellationToken);
+    Task SetRelationshipAsync(TResource leftResource, string relationshipName, object? rightValue, CancellationToken cancellationToken);
 
     /// <summary>
     /// Adds resources to a to-many relationship in the underlying data store.
     /// </summary>
-    Task AddToToManyRelationshipAsync(TResource? leftResource, TId leftId, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken);
+    Task AddToToManyRelationshipAsync(TResource? leftResource, TId leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken);
 
     /// <summary>
     /// Removes resources from a to-many relationship in the underlying data store.
     /// </summary>
-    Task RemoveFromToManyRelationshipAsync(TResource leftResource, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken);
+    Task RemoveFromToManyRelationshipAsync(TResource leftResource, string relationshipName, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken);
 }

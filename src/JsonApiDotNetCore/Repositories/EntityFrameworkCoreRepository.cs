@@ -386,7 +386,7 @@ public class EntityFrameworkCoreRepository<TResource, TId> : IResourceRepository
     }
 
     /// <inheritdoc />
-    public virtual async Task SetRelationshipAsync(TResource leftResource, object? rightValue, CancellationToken cancellationToken)
+    public virtual async Task SetRelationshipAsync(TResource leftResource, string relationshipName, object? rightValue, CancellationToken cancellationToken)
     {
         _traceWriter.LogMethodStart(new
         {
@@ -415,7 +415,7 @@ public class EntityFrameworkCoreRepository<TResource, TId> : IResourceRepository
     }
 
     /// <inheritdoc />
-    public virtual async Task AddToToManyRelationshipAsync(TResource? leftResource, TId leftId, ISet<IIdentifiable> rightResourceIds,
+    public virtual async Task AddToToManyRelationshipAsync(TResource? leftResource, TId leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds, 
         CancellationToken cancellationToken)
     {
         _traceWriter.LogMethodStart(new
@@ -479,7 +479,7 @@ public class EntityFrameworkCoreRepository<TResource, TId> : IResourceRepository
     }
 
     /// <inheritdoc />
-    public virtual async Task RemoveFromToManyRelationshipAsync(TResource leftResource, ISet<IIdentifiable> rightResourceIds,
+    public virtual async Task RemoveFromToManyRelationshipAsync(TResource leftResource, string relationshipName, ISet<IIdentifiable> rightResourceIds, 
         CancellationToken cancellationToken)
     {
         _traceWriter.LogMethodStart(new
