@@ -44,17 +44,17 @@ public sealed class PerformerRepository : IResourceRepository<Performer, int>
         throw new NotImplementedException();
     }
 
-    public Task SetRelationshipAsync(Performer leftResource, object? rightValue, CancellationToken cancellationToken)
+    public Task SetRelationshipAsync(Performer leftResource, string relationshipName, object? rightValue, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task AddToToManyRelationshipAsync(Performer? leftResource, int leftId, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
+    public Task AddToToManyRelationshipAsync(Performer? leftResource, int leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }
 
-    public Task RemoveFromToManyRelationshipAsync(Performer leftResource, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
+    public Task RemoveFromToManyRelationshipAsync(Performer leftResource, string relationshipName, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
     {
         throw new NotImplementedException();
     }

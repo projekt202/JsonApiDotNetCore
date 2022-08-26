@@ -59,19 +59,19 @@ public interface IResourceRepositoryAccessor
     /// <summary>
     /// Invokes <see cref="IResourceWriteRepository{TResource,TId}.SetRelationshipAsync" /> for the specified resource type.
     /// </summary>
-    Task SetRelationshipAsync<TResource>(TResource leftResource, object? rightValue, CancellationToken cancellationToken)
+    Task SetRelationshipAsync<TResource>(TResource leftResource, string relationshipName, object? rightValue, CancellationToken cancellationToken)
         where TResource : class, IIdentifiable;
 
     /// <summary>
     /// Invokes <see cref="IResourceWriteRepository{TResource,TId}.AddToToManyRelationshipAsync" /> for the specified resource type.
     /// </summary>
-    Task AddToToManyRelationshipAsync<TResource, TId>(TResource? leftResource, TId leftId, ISet<IIdentifiable> rightResourceIds,
+    Task AddToToManyRelationshipAsync<TResource, TId>(TResource? leftResource, TId leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds, 
         CancellationToken cancellationToken)
         where TResource : class, IIdentifiable<TId>;
 
     /// <summary>
     /// Invokes <see cref="IResourceWriteRepository{TResource,TId}.RemoveFromToManyRelationshipAsync" /> for the specified resource type.
     /// </summary>
-    Task RemoveFromToManyRelationshipAsync<TResource>(TResource leftResource, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
+    Task RemoveFromToManyRelationshipAsync<TResource>(TResource leftResource, string relationshipName, ISet<IIdentifiable> rightResourceIds, CancellationToken cancellationToken)
         where TResource : class, IIdentifiable;
 }

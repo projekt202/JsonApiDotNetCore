@@ -329,7 +329,7 @@ public class JsonApiResourceService<TResource, TId> : IResourceService<TResource
     }
 
     /// <inheritdoc />
-    public virtual async Task AddToToManyRelationshipAsync(TId leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds,
+    public virtual async Task AddToToManyRelationshipAsync(TId leftId, string relationshipName, ISet<IIdentifiable> rightResourceIds, 
         CancellationToken cancellationToken)
     {
         _traceWriter.LogMethodStart(new
@@ -375,7 +375,7 @@ public class JsonApiResourceService<TResource, TId> : IResourceService<TResource
 
         try
         {
-            await _repositoryAccessor.AddToToManyRelationshipAsync(resourceFromDatabase, leftId, effectiveRightResourceIds, cancellationToken);
+            await _repositoryAccessor.AddToToManyRelationshipAsync(resourceFromDatabase, leftId, relationshipName, effectiveRightResourceIds, cancellationToken);
         }
         catch (DataStoreUpdateException)
         {
@@ -509,7 +509,7 @@ public class JsonApiResourceService<TResource, TId> : IResourceService<TResource
 
         try
         {
-            await _repositoryAccessor.SetRelationshipAsync(resourceFromDatabase, effectiveRightValue, cancellationToken);
+            await _repositoryAccessor.SetRelationshipAsync(resourceFromDatabase, relationshipName, effectiveRightValue, cancellationToken);
         }
         catch (DataStoreUpdateException)
         {
@@ -578,7 +578,7 @@ public class JsonApiResourceService<TResource, TId> : IResourceService<TResource
 
         await _resourceDefinitionAccessor.OnPrepareWriteAsync(resourceFromDatabase, WriteOperationKind.SetRelationship, cancellationToken);
 
-        await _repositoryAccessor.RemoveFromToManyRelationshipAsync(resourceFromDatabase, effectiveRightResourceIds, cancellationToken);
+        await _repositoryAccessor.RemoveFromToManyRelationshipAsync(resourceFromDatabase, relationshipName, effectiveRightResourceIds, cancellationToken);
     }
 
     protected async Task<TResource> GetPrimaryResourceByIdAsync(TId id, TopFieldSelection fieldSelection, CancellationToken cancellationToken)
